@@ -1,0 +1,6 @@
+{
+  "name": "PocketCodex",
+  "description": "A polished ChatGPT iOS clone with iOS-style animations, voice/haptic feels, beautiful sidebar, settings/info popup, full functional server-side Gemini chatbot, and pristine typography.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
