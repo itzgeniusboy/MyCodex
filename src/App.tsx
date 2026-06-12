@@ -1198,14 +1198,12 @@ export default function App() {
       let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
       
       // Append hidden context rule to the very last user message content
-      if (apiMessages.length > 0) {
+      if (apiMessages.length > 0 && projectEnv !== "chat") {
         const lastMsg = apiMessages[apiMessages.length - 1];
         if (lastMsg.role === "user") {
           const hiddenRule = projectEnv === "web"
             ? "\n\n(System Context: The user is in a strict raw browser sandbox. You MUST deliver code ONLY as standard self-contained HTML/CSS/JavaScript. DO NOT use React component file types, JSX, TypeScript syntax, or npm import packages like lucide-react.)"
-            : projectEnv === "android"
-            ? "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)"
-            : "\n\n(System Context: The user just wants to converse normally. Do not generate code blocks or artifact containers unless explicitly asked.)";
+            : "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)";
           
           lastMsg.content = lastMsg.content + hiddenRule;
         }
@@ -1219,6 +1217,7 @@ export default function App() {
           messages: apiMessages,
           customApiKey: localStorage.getItem("chat_gpt_ios_custom_key") || "",
           activeEngine: getActiveEngine(),
+          projectEnv: projectEnv,
           gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
             repo: selectedRepo,
             filename: selectedFile,
@@ -2257,7 +2256,8 @@ export default function App() {
               body: JSON.stringify({
                 messages: [{ role: "user", content: speechContent }],
                 customApiKey: localStorage.getItem("chat_gpt_ios_custom_key") || "",
-                activeEngine: getActiveEngine()
+                activeEngine: getActiveEngine(),
+                projectEnv: "chat"
               })
             });
             if (!response.ok) throw new Error("API call error");
