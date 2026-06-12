@@ -579,6 +579,7 @@ export default function App() {
   const [isArtifactCopied, setIsArtifactCopied] = useState(false);
   const [mainTab, setMainTab] = useState<"chat" | "preview">("chat");
   const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
+  const [isMobileViewport, setIsMobileViewport] = useState(typeof window !== "undefined" ? window.innerWidth < 640 : false);
 
   // Advanced Sandbox Multi-platform Simulator States
   const [previewDevice, setPreviewDevice] = useState<"iphone" | "ipad" | "macbook" | "fullscreen">("iphone");
@@ -784,10 +785,14 @@ export default function App() {
 
     const handleResize = () => {
       setVisualViewportHeight(window.visualViewport.height);
+      setIsMobileViewport(window.innerWidth < 640);
     };
 
     window.visualViewport.addEventListener("resize", handleResize);
     window.visualViewport.addEventListener("scroll", handleResize);
+    
+    // Also bind standard window resize just in case
+    window.addEventListener("resize", handleResize);
     
     // Initial call
     handleResize();
@@ -795,6 +800,7 @@ export default function App() {
     return () => {
       window.visualViewport?.removeEventListener("resize", handleResize);
       window.visualViewport?.removeEventListener("scroll", handleResize);
+      window.removeEventListener("resize", handleResize);
     };
   }, []);
 
@@ -2041,37 +2047,86 @@ export default function App() {
 
         {/* Dynamic Full-Bleed Preview Sandbox Tab View */}
         <div 
-          className="absolute inset-0 z-10 w-full h-full bg-[#0c0c0e] flex flex-col pt-11 sm:pt-14"
+          className="absolute inset-0 z-10 w-full h-full bg-[#0c0c0e] flex flex-col pt-16"
           style={{ display: mainTab === "preview" ? "flex" : "none" }}
         >
           {/* Main Live Stage Area */}
           <div className="flex-1 flex flex-row relative bg-[#09090b] overflow-hidden">
             {/* Viewport Stage */}
-            <div className="flex-1 flex items-center justify-center p-0 overflow-hidden bg-[#0a0a0c]">
-              <div 
-                className={`relative flex flex-col transition-all duration-300 overflow-hidden h-full ${
-                  previewDevice === "iphone"
-                    ? "w-full max-w-[375px] border-x border-[#1a1a24]/50"
-                    : previewDevice === "macbook"
-                    ? "w-full max-w-[1024px] border-x border-[#1a1a24]/50"
-                    : "w-full"
-                }`}
-              >
-                {/* Active Compilation Overlay Loader */}
-                {compilationStatus === "compiling" && (
-                  <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
-                    <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
-                    <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
-                  </div>
-                )}
-
-                {/* Actual Running Sandboxed App Frame */}
-                <iframe
-                  title="PocketCodex Main Running Preview"
-                  srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
-                  className="w-full h-full border-0 bg-[#0c0c0e]"
-                />
-              </div>
+            <div className="flex-1 bg-[#08090a] flex items-center justify-center p-4 w-full h-full overflow-y-auto">
+              {previewDevice === "iphone" ? (
+                /* Phone (📱 Layout): Standard handheld device specifications with dynamic speaker notch shape and bezel casing */
+                <div 
+                  className="border-[10px] border-black rounded-[36px] mx-auto shadow-2xl relative overflow-hidden bg-[#0c0c0e]"
+                  style={{ 
+                    width: "320px", 
+                    height: "550px"
+                  }}
+                >
+                  {/* Speaker Notch Simulator */}
+                  <div className="w-16 h-3 bg-black absolute top-1 left-1/2 -translate-x-1/2 rounded-full z-50 pointer-events-none" />
+                  
+                  {/* Active Compilation Overlay Loader */}
+                  {compilationStatus === "compiling" && (
+                    <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
+                      <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
+                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                    </div>
+                  )}
+                  <iframe
+                    title="PocketCodex Main Running Preview"
+                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                    className="w-full h-full border-0 bg-[#0c0c0e]"
+                  />
+                </div>
+              ) : previewDevice === "macbook" ? (
+                /* Desktop (💻 Layout): Sleek Desktop PC Widescreen layout with smart scaling and bezel casing */
+                <div 
+                  className="border-4 border-zinc-700 bg-[#111215] rounded-xl shadow-2xl mx-auto overflow-hidden relative"
+                  style={{ 
+                    width: "760px", 
+                    height: "420px",
+                    transform: "scale(0.45)",
+                    transformOrigin: "center center",
+                    transition: "all 0.3s ease-in-out"
+                  }}
+                >
+                  {/* Active Compilation Overlay Loader */}
+                  {compilationStatus === "compiling" && (
+                    <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
+                      <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
+                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                    </div>
+                  )}
+                  <iframe
+                    title="PocketCodex Main Running Preview"
+                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                    className="w-full h-full border-0 bg-[#0c0c0e]"
+                  />
+                </div>
+              ) : (
+                /* Fullscreen (🔀 Layout): Direct maximum aspect view, stripping away dynamic borders or frame elements */
+                <div 
+                  className="w-full h-full border-0 rounded-none m-0 p-0 relative overflow-hidden bg-[#0c0c0e]"
+                  style={{ 
+                    width: "100%", 
+                    height: "100%"
+                  }}
+                >
+                  {/* Active Compilation Overlay Loader */}
+                  {compilationStatus === "compiling" && (
+                    <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
+                      <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
+                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                    </div>
+                  )}
+                  <iframe
+                    title="PocketCodex Main Running Preview"
+                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                    className="w-full h-full border-0 bg-[#0c0c0e]"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Slide-out Terminal Logs Inspector Panel */}
