@@ -1224,55 +1224,88 @@ export default function App() {
         }
       }
 
+      let reply = "";
       if (isGeminiFamily && apiKey) {
-        // Enforce Direct Google Gemini REST Pipeline bypassing proxy for direct customer keys
-        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
-        
-        let payload: any = null;
-        if (projectEnv === "chat") {
-          // Normalize the Google Gemini Request Schema for JUST CHAT mode
-          payload = {
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: text }]
-              }
-            ],
-            generationConfig: {
-              temperature: 0.7
-            }
-          };
-        } else {
-          // Normal system context generation payloads
-          const contents = apiMessages.map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }]
-          }));
+        // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
+        const modelsToTry = [
+          selectedModel,
+          "gemini-1.5-flash-latest",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+          "gemini-1.5-pro-latest",
+          "gemini-1.5-pro"
+        ];
 
-          let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
+        let success = false;
+        let lastErr: any = null;
+
+        for (const currentModel of modelsToTry) {
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
           
-          if (gitHubConnectedState === "connected" && selectedRepo && selectedFile) {
-            systemInstruction += `\n\n[Active GitHub Workspace context]:\nRepository: ${selectedRepo}\nActive Target File: ${selectedFile}\n\nHere is the existing code inside ${selectedFile}:\n\n\`\`\`\n${selectedFileContent}\n\`\`\`\n\nAnalyze this code. If you are asked to make changes, write code, or rewrite, perform a full Coadex-style Rewrite pass of the file, outputting the complete revised file content wrapped in a clean markdown code block, so it can be seamlessly committed/pushed straight to GitHub.`;
+          let payload: any = null;
+          if (projectEnv === "chat") {
+            // STRICT chat payload: strictly format raw user text query - no system prompt boilerplates or instruction formatters
+            payload = {
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: text }]
+                }
+              ]
+            };
+          } else {
+            // Normal system context generation payloads
+            const contents = apiMessages.map(m => ({
+              role: m.role === "assistant" ? "model" : "user",
+              parts: [{ text: m.content }]
+            }));
+
+            let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
+            
+            if (gitHubConnectedState === "connected" && selectedRepo && selectedFile) {
+              systemInstruction += `\n\n[Active GitHub Workspace context]:\nRepository: ${selectedRepo}\nActive Target File: ${selectedFile}\n\nHere is the existing code inside ${selectedFile}:\n\n\`\`\`\n${selectedFileContent}\n\`\`\`\n\nAnalyze this code. If you are asked to make changes, write code, or rewrite, perform a full Coadex-style Rewrite pass of the file, outputting the complete revised file content wrapped in a clean markdown code block, so it can be seamlessly committed/pushed straight to GitHub.`;
+            }
+
+            payload = {
+              contents: contents,
+              systemInstruction: {
+                parts: [{ text: systemInstruction }]
+              },
+              generationConfig: {
+                temperature: 0.7
+              }
+            };
           }
 
-          payload = {
-            contents: contents,
-            systemInstruction: {
-              parts: [{ text: systemInstruction }]
+          fetchOptions = {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
             },
-            generationConfig: {
-              temperature: 0.7
-            }
+            body: JSON.stringify(payload)
           };
+
+          try {
+            const response = await fetch(apiUrl, fetchOptions);
+            if (response.ok) {
+              const data = await response.json();
+              reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
+              success = true;
+              selectedModel = currentModel; // Update final active model identifier for debug view
+              break;
+            } else {
+              const errBody = await response.text();
+              lastErr = new Error(`Google API returned status ${response.status} for model ${currentModel}: ${errBody}`);
+            }
+          } catch (fe) {
+            lastErr = fe;
+          }
         }
 
-        fetchOptions = {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(payload)
-        };
+        if (!success) {
+          throw lastErr || new Error("All attempted Gemini model endpoints returned failure status.");
+        }
+
       } else {
         // Normal Node.js proxy payload fallback
         apiUrl = "/api/chat";
@@ -1291,20 +1324,8 @@ export default function App() {
             } : null
           })
         };
-      }
 
-      // Execute Network Fetch
-      const response = await fetch(apiUrl, fetchOptions);
-
-      let reply = "";
-      if (isGeminiFamily && apiKey) {
-        if (!response.ok) {
-          const errBody = await response.text();
-          throw new Error(`Google API returned status ${response.status}: ${errBody}`);
-        }
-        const data = await response.json();
-        reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
-      } else {
+        const response = await fetch(apiUrl, fetchOptions);
         if (!response.ok) {
           const errData = await response.json();
           throw new Error(errData.error || "Failed server API response status");
