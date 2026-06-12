@@ -465,15 +465,29 @@ async function startServer() {
             console.log(`Attempting generateContent via raw REST with model: ${currentModel}`);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
             
-            const payload = {
-              contents: contents,
-              systemInstruction: {
-                parts: [{ text: systemInstruction }]
-              },
-              generationConfig: {
-                temperature: 0.7
-              }
-            };
+            const lastUserMsg = messages[messages.length - 1]?.content || "";
+            let payload: any = null;
+
+            if (projectEnv === "chat") {
+              payload = {
+                contents: [
+                  {
+                    role: "user",
+                    parts: [{ text: lastUserMsg }]
+                  }
+                ]
+              };
+            } else {
+              payload = {
+                contents: contents,
+                systemInstruction: {
+                  parts: [{ text: systemInstruction }]
+                },
+                generationConfig: {
+                  temperature: 0.7
+                }
+              };
+            }
 
             const response = await fetch(url, {
               method: "POST",
