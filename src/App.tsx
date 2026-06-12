@@ -1194,6 +1194,21 @@ export default function App() {
     setInputMessage("");
     setIsAiLoading(true);
 
+    const engine = getActiveEngine();
+    const customKey = localStorage.getItem("chat_gpt_ios_custom_key") || "";
+    const apiKey = (customKey.trim() !== "") ? customKey.trim() : engine.apiKey;
+    
+    const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || apiKey.startsWith("AIzaSy");
+    
+    let selectedModel = "gemini-1.5-flash";
+    if (engine.provider?.toLowerCase().includes("pro")) {
+      selectedModel = "gemini-1.5-pro";
+    }
+
+    const currentMode = projectEnv === "chat" ? "JUST CHAT" : "BUILD ARTIFACTS";
+    let apiUrl = "/api/chat";
+    let fetchOptions: RequestInit = {};
+
     try {
       let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
       
@@ -1209,33 +1224,99 @@ export default function App() {
         }
       }
 
-      // Call standard server side full-stack API route to generate Gemini content safely
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: apiMessages,
-          customApiKey: localStorage.getItem("chat_gpt_ios_custom_key") || "",
-          activeEngine: getActiveEngine(),
-          projectEnv: projectEnv,
-          gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
-            repo: selectedRepo,
-            filename: selectedFile,
-            content: selectedFileContent
-          } : null
-        })
-      });
+      if (isGeminiFamily && apiKey) {
+        // Enforce Direct Google Gemini REST Pipeline bypassing proxy for direct customer keys
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+        
+        let payload: any = null;
+        if (projectEnv === "chat") {
+          // Normalize the Google Gemini Request Schema for JUST CHAT mode
+          payload = {
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: text }]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.7
+            }
+          };
+        } else {
+          // Normal system context generation payloads
+          const contents = apiMessages.map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }]
+          }));
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed server API response status");
+          let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
+          
+          if (gitHubConnectedState === "connected" && selectedRepo && selectedFile) {
+            systemInstruction += `\n\n[Active GitHub Workspace context]:\nRepository: ${selectedRepo}\nActive Target File: ${selectedFile}\n\nHere is the existing code inside ${selectedFile}:\n\n\`\`\`\n${selectedFileContent}\n\`\`\`\n\nAnalyze this code. If you are asked to make changes, write code, or rewrite, perform a full Coadex-style Rewrite pass of the file, outputting the complete revised file content wrapped in a clean markdown code block, so it can be seamlessly committed/pushed straight to GitHub.`;
+          }
+
+          payload = {
+            contents: contents,
+            systemInstruction: {
+              parts: [{ text: systemInstruction }]
+            },
+            generationConfig: {
+              temperature: 0.7
+            }
+          };
+        }
+
+        fetchOptions = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        };
+      } else {
+        // Normal Node.js proxy payload fallback
+        apiUrl = "/api/chat";
+        fetchOptions = {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: apiMessages,
+            customApiKey: customKey,
+            activeEngine: engine,
+            projectEnv: projectEnv,
+            gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
+              repo: selectedRepo,
+              filename: selectedFile,
+              content: selectedFileContent
+            } : null
+          })
+        };
       }
 
-      const data = await response.json();
+      // Execute Network Fetch
+      const response = await fetch(apiUrl, fetchOptions);
+
+      let reply = "";
+      if (isGeminiFamily && apiKey) {
+        if (!response.ok) {
+          const errBody = await response.text();
+          throw new Error(`Google API returned status ${response.status}: ${errBody}`);
+        }
+        const data = await response.json();
+        reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
+      } else {
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Failed server API response status");
+        }
+        const data = await response.json();
+        reply = data.reply;
+      }
+
       const assistantMsg: Message = {
         id: `msg-${Date.now() + 1}`,
         role: "assistant",
-        content: data.reply,
+        content: reply,
         timestamp: new Date()
       };
 
@@ -1248,7 +1329,25 @@ export default function App() {
       );
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || "Something went wrong. Please confirm your GEMINI_API_KEY settings.");
+      
+      const debugMsgContent = `⚠️ DEBUG INFO:\nError: ${err.message}\nAttempted URL: ${apiUrl}\nActive Model: ${selectedModel}\nMode: ${currentMode}`;
+      
+      const debugMsg: Message = {
+        id: `msg-debug-${Date.now()}`,
+        role: "assistant",
+        content: debugMsgContent,
+        timestamp: new Date()
+      };
+
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.id === (currentThread ? currentThread.id : activeThreadId)
+            ? { ...t, messages: [...updatedMsgs, debugMsg], updatedAt: new Date() }
+            : t
+        )
+      );
+
+      setErrorMessage(`Model Request Failed: ${err.message}\n\n${debugMsgContent}`);
     } finally {
       setIsAiLoading(false);
     }
