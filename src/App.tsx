@@ -48,7 +48,7 @@ import GmailConsoleModal from "./components/GmailConsoleModal";
 import { Message, ChatThread, UserProfile, PresetPrompt } from "./types";
 
 // Helper function to prepare code for safe and live-running iframe compilation (transpiles React JSX/TSX code)
-function prepareSandboxCode(rawCode: string, env: "web" | "android" = "web"): string {
+function prepareSandboxCode(rawCode: string, env: "web" | "android" | "chat" = "web"): string {
   if (!rawCode) return "";
   let cleaned = rawCode.trim();
   
@@ -556,7 +556,7 @@ export default function App() {
   const [isGmailConsoleOpen, setIsGmailConsoleOpen] = useState(false);
 
   // Custom attachment states & input refs
-  const [projectEnv, setProjectEnv] = useState<"web" | "android">("web");
+  const [projectEnv, setProjectEnv] = useState<"web" | "android" | "chat">("web");
   const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{
@@ -1203,7 +1203,9 @@ export default function App() {
         if (lastMsg.role === "user") {
           const hiddenRule = projectEnv === "web"
             ? "\n\n(System Context: The user is in a strict raw browser sandbox. You MUST deliver code ONLY as standard self-contained HTML/CSS/JavaScript. DO NOT use React component file types, JSX, TypeScript syntax, or npm import packages like lucide-react.)"
-            : "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)";
+            : projectEnv === "android"
+            ? "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)"
+            : "\n\n(System Context: The user just wants to converse normally. Do not generate code blocks or artifact containers unless explicitly asked.)";
           
           lastMsg.content = lastMsg.content + hiddenRule;
         }
@@ -1392,20 +1394,22 @@ export default function App() {
             >
               <span>Chat</span>
             </button>
-            <button
-              onClick={() => {
-                triggerHapticFeedback();
-                setMainTab("preview");
-                setShowInspectorPanel(false);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg font-bold transition cursor-pointer ${
-                mainTab === "preview" && !showInspectorPanel
-                  ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
-                  : "text-neutral-450 hover:text-neutral-200"
-              }`}
-            >
-              <span>Preview</span>
-            </button>
+            {projectEnv !== "chat" && (
+              <button
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setMainTab("preview");
+                  setShowInspectorPanel(false);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg font-bold transition cursor-pointer ${
+                  mainTab === "preview" && !showInspectorPanel
+                    ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
+                    : "text-neutral-450 hover:text-neutral-200"
+                }`}
+              >
+                <span>Preview</span>
+              </button>
+            )}
             {projectEnv === "android" && (
               <button
                 onClick={() => {
@@ -1427,26 +1431,65 @@ export default function App() {
           {/* Right Header Navigation - GitHub Push OR Cyclic Viewport Engine Toggler when in Preview */}
           <div className="flex items-center pr-1 pointer-events-auto">
             {mainTab === "preview" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHapticFeedback();
-                  setPreviewDevice(current => {
-                    if (current === "iphone") return "macbook";
-                    if (current === "macbook") return "fullscreen";
-                    return "iphone";
-                  });
-                }}
-                className="flex items-center gap-1.5 h-8 px-2.5 bg-[#0f0f12] border border-neutral-850 hover:bg-neutral-850 text-amber-500 hover:text-amber-400 rounded-xl transition shadow-sm font-bold text-[10px]"
-                title={`Viewport Control: ${previewDevice === "iphone" ? "Phone Mode (375px)" : previewDevice === "macbook" ? "Desktop Mode (1024px)" : "Full Stretch Mode"}`}
+              <div 
+                id="viewport-controls-capsule"
+                className="flex items-center gap-1 bg-[#121214]/80 border border-neutral-850/60 p-1 rounded-xl shadow-md"
               >
-                {previewDevice === "iphone" && <Smartphone className="h-3.5 w-3.5" />}
-                {previewDevice === "macbook" && <Laptop className="h-3.5 w-3.5" />}
-                {previewDevice === "fullscreen" && <Maximize2 className="h-3.5 w-3.5" />}
-                <span className="hidden xs:inline uppercase tracking-widest text-[9px] text-neutral-400 font-mono">
-                  {previewDevice === "iphone" ? "Phone" : previewDevice === "macbook" ? "Desktop" : "Full"}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    triggerHapticFeedback();
+                    setPreviewDevice("iphone");
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 text-[9.5px] rounded-lg font-bold uppercase transition tracking-wider cursor-pointer ${
+                    previewDevice === "iphone"
+                      ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
+                      : "text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Phone Mode (320px)"
+                >
+                  <Smartphone className="h-3.5 w-3.5" />
+                  <span className="hidden xs:inline uppercase tracking-widest text-[9px] font-mono">Phone</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    triggerHapticFeedback();
+                    setPreviewDevice("macbook");
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 text-[9.5px] rounded-lg font-bold uppercase transition tracking-wider cursor-pointer ${
+                    previewDevice === "macbook"
+                      ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
+                      : "text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Desktop Mode (760px)"
+                >
+                  <Laptop className="h-3.5 w-3.5" />
+                  <span className="hidden xs:inline uppercase tracking-widest text-[9px] font-mono">Desktop</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    triggerHapticFeedback();
+                    setPreviewDevice("fullscreen");
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 text-[9.5px] rounded-lg font-bold uppercase transition tracking-wider cursor-pointer ${
+                    previewDevice === "fullscreen"
+                      ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
+                      : "text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Full Stretch Mode"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  <span className="hidden xs:inline uppercase tracking-widest text-[9px] font-mono">Full</span>
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleGitHubPush}
@@ -1815,21 +1858,28 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     triggerHapticFeedback();
-                    const nextEnv = projectEnv === "web" ? "android" : "web";
+                    const nextEnv = projectEnv === "web" ? "android" : projectEnv === "android" ? "chat" : "web";
                     setProjectEnv(nextEnv);
-                    if (nextEnv === "web") {
+                    if (nextEnv === "web" || nextEnv === "chat") {
                       setShowInspectorPanel(false);
+                    }
+                    if (nextEnv === "chat") {
+                      setMainTab("chat");
                     }
                   }}
                   className="flex items-center gap-1.5 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-neutral-300 hover:text-white bg-[#161619] border border-neutral-800/80 rounded-full shadow-lg transition select-none active:scale-95"
-                  title="Toggle Environment (Web / Android)"
+                  title="Toggle Environment (WEB APP / ANDROID APK / JUST CHAT)"
                 >
                   {projectEnv === "web" ? (
-                    <Globe className="h-3 w-3 text-sky-400" />
+                    <Globe className="h-3 w-3 text-neutral-400" />
+                  ) : projectEnv === "android" ? (
+                    <Smartphone className="h-3 w-3 text-neutral-400" />
                   ) : (
-                    <Smartphone className="h-3 w-3 text-emerald-400" />
+                    <MessageSquare className="h-3 w-3 text-neutral-400" />
                   )}
-                  <span>{projectEnv === "web" ? "Web" : "APK"}</span>
+                  <span>
+                    {projectEnv === "web" ? "WEB APP" : projectEnv === "android" ? "ANDROID APK" : "JUST CHAT"}
+                  </span>
                 </button>
               </div>
 
