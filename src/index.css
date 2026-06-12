@@ -7,8 +7,17 @@
 }
 
 @layer base {
+  html, body, #root {
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
   body {
-    @apply font-sans bg-[#0c0c0e] text-neutral-100 antialiased overflow-hidden selection:bg-neutral-800 selection:text-neutral-100;
+    @apply font-sans bg-[#0c0c0e] text-neutral-100 antialiased selection:bg-neutral-800 selection:text-neutral-100;
   }
 }
 

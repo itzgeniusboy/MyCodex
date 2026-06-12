@@ -77,8 +77,59 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
 
               {/* Header */}
               <div className="flex flex-col items-center text-center mt-3 mb-6">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600/10 text-blue-400 mb-3 border border-blue-500/20">
-                  <Sparkles className="h-6 w-6 text-blue-400 animate-pulse" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 border border-neutral-800 p-1.5 mb-4 shadow-xl overflow-hidden relative">
+                  {/* Subtle amber background gradient shadow */}
+                  <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/10 via-[#FF5500]/5 to-transparent rounded-2xl pointer-events-none" />
+                  
+                  <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-full w-full animate-pulse">
+                    <defs>
+                      <radialGradient id="centralGlowLogin" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stopColor="#FF7300" stopOpacity="1" />
+                        <stop offset="50%" stopColor="#FF5500" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="#FF5500" stopOpacity="0" />
+                      </radialGradient>
+                      <linearGradient id="traceGradLogin" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#FF7300" stopOpacity="0.8" />
+                        <stop offset="100%" stopColor="#FF5500" stopOpacity="0.3" />
+                      </linearGradient>
+                    </defs>
+                    <circle cx="50" cy="50" r="28" fill="url(#centralGlowLogin)" opacity="0.45" />
+                    <g stroke="url(#traceGradLogin)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.75">
+                      <path d="M 50 38 V 15" />
+                      <path d="M 45 42 V 30 H 39 V 15" />
+                      <path d="M 55 42 V 30 H 61 V 15" />
+                      <path d="M 41 45 V 34 H 31 V 22" />
+                      <path d="M 59 45 V 34 H 69 V 22" />
+                      <path d="M 50 62 V 85" />
+                      <path d="M 45 58 V 70 H 39 V 85" />
+                      <path d="M 55 58 V 70 H 61 V 85" />
+                      <path d="M 41 55 V 66 H 31 V 78" />
+                      <path d="M 59 55 V 66 H 69 V 78" />
+                      <path d="M 30 50 H 18" />
+                      <path d="M 70 50 H 82" />
+                    </g>
+                    <g fill="#FF5500" opacity="0.85">
+                      <circle cx="50" cy="15" r="2" />
+                      <circle cx="39" cy="15" r="2" />
+                      <circle cx="61" cy="15" r="2" />
+                      <circle cx="31" cy="22" r="2" />
+                      <circle cx="69" cy="22" r="2" />
+                      <circle cx="50" cy="85" r="2" />
+                      <circle cx="39" cy="85" r="2" />
+                      <circle cx="61" cy="85" r="2" />
+                      <circle cx="31" cy="78" r="2" />
+                      <circle cx="69" cy="78" r="2" />
+                      <circle cx="18" cy="50" r="2" />
+                      <circle cx="82" cy="50" r="2" />
+                    </g>
+                    <path d="M 33 32 L 18 50 L 33 68" stroke="#FF5500" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.8" />
+                    <path d="M 33 32 L 18 50 L 33 68" stroke="#121215" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    <path d="M 67 32 L 82 50 L 67 68" stroke="#FF5500" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.8" />
+                    <path d="M 67 32 L 82 50 L 67 68" stroke="#121215" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    <circle cx="50" cy="50" r="11" fill="#141416" stroke="#FF5500" strokeWidth="1.5" />
+                    <circle cx="50" cy="50" r="6" fill="#FF7300" />
+                    <circle cx="50" cy="50" r="3" fill="#FFE5D9" />
+                  </svg>
                 </div>
                 <h3 className="text-xl font-bold tracking-tight text-neutral-100">
                   {isRegistering ? "Create your account" : "Welcome back"}
