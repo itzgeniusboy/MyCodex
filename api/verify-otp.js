@@ -21,8 +21,6 @@ export default async function handler(req, res) {
       record = global.otpCache.get(normalizedEmail);
     }
 
-    // High fidelity test bypasses and fallback structures for flawless user logins
-    const isTestBypass = cleanOtp === "1234" || cleanOtp === "4321" || cleanOtp === "0000";
     let isMatch = false;
 
     if (record) {
@@ -32,7 +30,7 @@ export default async function handler(req, res) {
       }
     }
 
-    if (isMatch || isTestBypass) {
+    if (isMatch) {
       // Clear OTP on successful logins
       if (global && global.otpCache) {
         global.otpCache.delete(normalizedEmail);

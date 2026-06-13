@@ -2801,6 +2801,15 @@ const PARSER_WORKER_CODE = [
         onLoginSubmit={(profile) => {
           triggerHapticFeedback();
           setUser(profile);
+          // Instantly bind designated credentials to active global fetch parameters
+          if (profile.designatedApiKey) {
+            localStorage.setItem("gemini_api_key", profile.designatedApiKey);
+            localStorage.setItem("chat_gpt_ios_custom_key", profile.designatedApiKey);
+          } else {
+            const token = "session-verified-token-" + btoa(profile.email);
+            localStorage.setItem("gemini_api_key", token);
+            localStorage.setItem("chat_gpt_ios_custom_key", token);
+          }
         }}
       />
 

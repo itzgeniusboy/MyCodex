@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Shield, Mail, ArrowRight, ArrowLeft, Loader2, KeyRound, Sparkles } from "lucide-react";
+import { X, Shield, Mail, ArrowRight, ArrowLeft, Loader2, KeyRound, Sparkles, Lock } from "lucide-react";
 import { UserProfile } from "../types";
 
 interface LoginModalProps {
@@ -11,14 +11,16 @@ interface LoginModalProps {
 
 export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModalProps) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginMethod, setLoginMethod] = useState<"otp" | "password">("otp");
   const [step, setStep] = useState<1 | 2>(1);
   const [otpArray, setOtpArray] = useState<string[]>(["", "", "", ""]);
   const [countdown, setCountdown] = useState<number>(120); // 2-minute limit
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isLoggingInWithPassword, setIsLoggingInWithPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [debugOtp, setDebugOtp] = useState<string | null>(null);
 
   const otpRefs = [
     useRef<HTMLInputElement>(null),
@@ -32,11 +34,51 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
     if (isOpen) {
       setStep(1);
       setOtpArray(["", "", "", ""]);
+      setPassword("");
       setErrorMessage(null);
       setSuccessMessage(null);
-      setDebugOtp(null);
     }
   }, [isOpen]);
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !email.includes("@")) {
+      setErrorMessage("Please enter a valid Gmail address.");
+      return;
+    }
+    if (!password || password.length < 4) {
+      setErrorMessage("Password must be at least 4 characters long.");
+      return;
+    }
+
+    setIsLoggingInWithPassword(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const response = await fetch("/api/login-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success && data.user) {
+        setSuccessMessage(data.message || "Logged in successfully!");
+        setTimeout(() => {
+          onLoginSubmit(data.user);
+          onClose();
+        }, 1000);
+      } else {
+        setErrorMessage(data.error || "Password verification failed. Incorrect password.");
+      }
+    } catch (err) {
+      setErrorMessage("Network error occurred while connecting to authentication core.");
+    } finally {
+      setIsLoggingInWithPassword(false);
+    }
+  };
 
   // Handle countdown logic
   useEffect(() => {
@@ -70,9 +112,6 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
 
       if (response.ok && data.success) {
         setSuccessMessage(data.message || "We dispatched a secure OTP to your email.");
-        if (data.debugOtp) {
-          setDebugOtp(data.debugOtp);
-        }
         setStep(2);
         setCountdown(120);
         // Focus first OTP field as soon as transition completes
@@ -210,15 +249,15 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
 
               {/* Icon Header */}
               <div className="flex flex-col items-center text-center mt-2 mb-6">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900/90 border border-amber-500/20 shadow-lg mb-4 relative overflow-hidden group">
-                  <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
-                  <KeyRound className="h-5 w-5 text-amber-400 group-hover:rotate-12 transition-transform duration-300" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900/90 border border-neutral-800 shadow-lg mb-4 relative overflow-hidden">
+                  <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-neutral-700 to-neutral-500" />
+                  <Lock className="h-5 w-5 text-neutral-400" />
                 </div>
-                <h3 className="text-xl font-extrabold tracking-tight text-white mb-1.5 flex items-center gap-1.5 justify-center">
-                  PocketCodex Core Access <Sparkles className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+                <h3 className="text-xl font-extrabold tracking-tight text-white mb-1.5 justify-center">
+                  PocketCodex Core Access
                 </h3>
                 <p className="text-xs text-neutral-400 max-w-xs leading-relaxed">
-                  Provide your Gmail to verify credentials and access your synced multithread dashboards.
+                  Provide your email to verify credentials and access your synced multithread dashboards.
                 </p>
               </div>
 
@@ -232,7 +271,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     className="mb-4 rounded-xl border border-red-500/20 bg-red-950/20 p-3 text-xs text-red-400 text-center font-medium"
                     id="otp-error-alert"
                   >
-                    ⚠️ {errorMessage}
+                    {errorMessage}
                   </motion.div>
                 )}
 
@@ -244,147 +283,245 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     className="mb-4 rounded-xl border border-amber-500/20 bg-amber-950/20 p-3 text-xs text-amber-400 text-center font-medium"
                     id="otp-success-alert"
                   >
-                    🎉 {successMessage}
+                    {successMessage}
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Inline Developer Assist Box */}
-              {debugOtp && (
-                <div className="mb-4 rounded-xl border border-cyan-500/20 bg-cyan-950/25 p-3 text-center">
-                  <p className="text-[10px] text-cyan-400 uppercase tracking-widest font-mono font-bold mb-1">Developer OTP Debug Bypass</p>
-                  <span className="font-mono text-lg font-extrabold tracking-widest bg-cyan-950/50 text-cyan-300 px-3 py-1 rounded-md border border-cyan-500/30">
-                    {debugOtp}
-                  </span>
-                </div>
-              )}
+              {/* Login Method Tab Toggles */}
+              <div className="flex gap-2 p-1 bg-neutral-950 rounded-xl border border-neutral-900 mb-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod("otp");
+                    setStep(1);
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
+                    loginMethod === "otp"
+                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      : "text-neutral-400 hover:text-neutral-200 border border-transparent"
+                  }`}
+                  id="tab-toggle-otp"
+                >
+                  Gmail OTP
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod("password");
+                    setStep(1);
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
+                    loginMethod === "password"
+                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      : "text-neutral-400 hover:text-neutral-200 border border-transparent"
+                  }`}
+                  id="tab-toggle-password"
+                >
+                  Gmail & Password
+                </button>
+              </div>
 
               {/* Transitions Container */}
               <div className="relative overflow-hidden min-h-[160px]">
                 <AnimatePresence mode="wait">
-                  {step === 1 ? (
-                    /* Step 1: Input Gmail address */
-                    <motion.div
-                      key="step-email-input"
-                      initial={{ opacity: 0, x: -15 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 15 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-4"
-                    >
-                      <form onSubmit={handleSendOtp} className="space-y-4">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Gmail Address</label>
-                          <div className="relative">
-                            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
-                            <input
-                              type="email"
-                              placeholder="itzraviking@gmail.com"
-                              value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                              className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
-                              required
-                              disabled={isSending}
-                              id="otp-email-input"
-                            />
+                  {loginMethod === "otp" ? (
+                    step === 1 ? (
+                      /* Step 1: Input Gmail address */
+                      <motion.div
+                        key="step-email-input"
+                        initial={{ opacity: 0, x: -15 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 15 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4"
+                      >
+                        <form onSubmit={handleSendOtp} className="space-y-4">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Email Address</label>
+                            <div className="relative">
+                              <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                              <input
+                                type="email"
+                                placeholder="name@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                                required
+                                disabled={isSending}
+                                id="otp-email-input"
+                              />
+                            </div>
                           </div>
-                        </div>
 
-                        <button
-                          type="submit"
-                          disabled={isSending}
-                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 p-3.5 text-sm font-semibold text-black shadow-lg shadow-amber-500/10 disabled:opacity-50 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                          id="otp-send-btn"
-                        >
-                          {isSending ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin text-black" />
-                              Generating Secret...
-                            </>
-                          ) : (
-                            <>
-                              ⚡ Send OTP Code
-                              <ArrowRight className="h-4 w-4 text-black" />
-                            </>
-                          )}
-                        </button>
-                      </form>
-                    </motion.div>
+                          <button
+                            type="submit"
+                            disabled={isSending}
+                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 p-3.5 text-sm font-semibold text-black shadow-lg shadow-amber-500/10 disabled:opacity-50 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                            id="otp-send-btn"
+                          >
+                            {isSending ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin text-black" />
+                                Sending...
+                              </>
+                            ) : (
+                              <>
+                                Sign In
+                                <ArrowRight className="h-4 w-4 text-black" />
+                              </>
+                            )}
+                          </button>
+                        </form>
+                      </motion.div>
+                    ) : (
+                      /* Step 2: Verification 1x4 Grid */
+                      <motion.div
+                        key="step-otp-verify"
+                        initial={{ opacity: 0, x: 15 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -15 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4"
+                      >
+                        <form onSubmit={handleVerifyOtp} className="space-y-4">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Verification OTP Code</label>
+                              <button
+                                type="button"
+                                onClick={() => setStep(1)}
+                                className="text-xs text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
+                              >
+                                <ArrowLeft className="h-3 w-3" /> Change Email
+                              </button>
+                            </div>
+
+                            {/* 4-digit verification grid layout */}
+                            <div className="flex items-center justify-center gap-3 py-2">
+                              {otpArray.map((digit, idx) => (
+                                <input
+                                  key={`otp-input-box-${idx}`}
+                                  ref={otpRefs[idx]}
+                                  type="text"
+                                  maxLength={1}
+                                  value={digit}
+                                  onChange={(e) => handleOtpInput(idx, e.target.value)}
+                                  onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                                  onPaste={idx === 0 ? handleOtpPaste : undefined}
+                                  className="w-12 h-14 text-center font-mono text-2xl font-extrabold rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-all duration-300"
+                                  required
+                                  id={`otp-input-field-${idx}`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Countdown state block */}
+                          <div className="flex items-center justify-between text-xs text-neutral-400 font-medium px-1">
+                            <span>Verified destination: <strong>{email}</strong></span>
+                            <span>
+                              {countdown > 0 ? (
+                                `Code expires in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}`
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendOtp()}
+                                  className="text-amber-500 hover:underline hover:text-amber-400 transition"
+                                >
+                                  Resend Core OTP
+                                </button>
+                              )}
+                            </span>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={isVerifying || otpArray.join("").length < 4}
+                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white hover:bg-neutral-100 py-3.5 text-sm font-semibold text-black transition-all duration-300 disabled:opacity-50"
+                            id="otp-verify-submit-btn"
+                          >
+                            {isVerifying ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin text-black" />
+                                Verifying...
+                              </>
+                            ) : (
+                              <>
+                                Sign In
+                                <ArrowRight className="h-4 w-4 text-black" />
+                              </>
+                            )}
+                          </button>
+                        </form>
+                      </motion.div>
+                    )
                   ) : (
-                    /* Step 2: Verification 1x4 Grid */
+                    /* Password Login Form */
                     <motion.div
-                      key="step-otp-verify"
+                      key="step-password-login"
                       initial={{ opacity: 0, x: 15 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -15 }}
                       transition={{ duration: 0.2 }}
                       className="space-y-4"
                     >
-                      <form onSubmit={handleVerifyOtp} className="space-y-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Verification OTP Code</label>
-                            <button
-                              type="button"
-                              onClick={() => setStep(1)}
-                              className="text-xs text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
-                            >
-                              <ArrowLeft className="h-3 w-3" /> Change Gmail
-                            </button>
-                          </div>
-
-                          {/* 4-digit verification grid layout */}
-                          <div className="flex items-center justify-center gap-3 py-2">
-                            {otpArray.map((digit, idx) => (
-                              <input
-                                key={`otp-input-box-${idx}`}
-                                ref={otpRefs[idx]}
-                                type="text"
-                                maxLength={1}
-                                value={digit}
-                                onChange={(e) => handleOtpInput(idx, e.target.value)}
-                                onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                                onPaste={idx === 0 ? handleOtpPaste : undefined}
-                                className="w-12 h-14 text-center font-mono text-2xl font-extrabold rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-all duration-300"
-                                required
-                                id={`otp-input-field-${idx}`}
-                              />
-                            ))}
+                      <form onSubmit={handlePasswordLogin} className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Email Address</label>
+                          <div className="relative">
+                            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                            <input
+                              type="email"
+                              placeholder="name@example.com"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                              required
+                              disabled={isLoggingInWithPassword}
+                              id="password-email-input"
+                            />
                           </div>
                         </div>
 
-                        {/* Countdown state block */}
-                        <div className="flex items-center justify-between text-xs text-neutral-400 font-medium px-1">
-                          <span>Verified destination: <strong>{email}</strong></span>
-                          <span>
-                            {countdown > 0 ? (
-                              `Code expires in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}`
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleSendOtp()}
-                                className="text-amber-500 hover:underline hover:text-amber-400 transition"
-                              >
-                                Resend Core OTP
-                              </button>
-                            )}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Password</label>
+                          <div className="relative">
+                            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                            <input
+                              type="password"
+                              placeholder="••••••••"
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                              required
+                              disabled={isLoggingInWithPassword}
+                              id="password-input"
+                            />
+                          </div>
+                          <span className="text-[10px] text-neutral-400 font-medium block">
+                            First login? Choose any password; it will register automatically!
                           </span>
                         </div>
 
                         <button
                           type="submit"
-                          disabled={isVerifying || otpArray.join("").length < 4}
-                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-white hover:bg-neutral-100 py-3.5 text-sm font-semibold text-black transition-all duration-300 disabled:opacity-50"
-                          id="otp-verify-submit-btn"
+                          disabled={isLoggingInWithPassword}
+                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 p-3.5 text-sm font-semibold text-black shadow-lg shadow-amber-500/10 disabled:opacity-50 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                          id="password-login-btn"
                         >
-                          {isVerifying ? (
+                          {isLoggingInWithPassword ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin text-black" />
-                              Verifying Signature...
+                              Signing In...
                             </>
                           ) : (
                             <>
-                              Verify & Login Securely
+                              Sign In
                               <ArrowRight className="h-4 w-4 text-black" />
                             </>
                           )}
@@ -397,7 +534,6 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
 
               {/* Safe storage verification disclaimer */}
               <div className="flex items-center gap-1.5 justify-center mt-6 pt-4 border-t border-neutral-900 text-[10px] text-neutral-500">
-                <Shield className="h-3 w-3 text-amber-500/60" />
                 <span>Encrypted secure credential checks in progress</span>
               </div>
             </motion.div>

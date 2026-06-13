@@ -19,6 +19,7 @@ export interface UserProfile {
   name: string;
   avatarUrl: string;
   isLoggedIn: boolean;
+  designatedApiKey?: string;
 }
 
 export interface PresetPrompt {
