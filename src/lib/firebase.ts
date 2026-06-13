@@ -7,11 +7,6 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-const provider = new GoogleAuthProvider();
-// Add Gmail read and send scopes
-provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
-provider.addScope("https://www.googleapis.com/auth/gmail.send");
-
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 
@@ -36,9 +31,14 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (withGmailScopes = false): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
+    const provider = new GoogleAuthProvider();
+    if (withGmailScopes) {
+      provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
+      provider.addScope("https://www.googleapis.com/auth/gmail.send");
+    }
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {

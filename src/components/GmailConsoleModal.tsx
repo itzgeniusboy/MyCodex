@@ -87,7 +87,7 @@ export default function GmailConsoleModal({
     triggerHaptic();
     setIsAuthorizing(true);
     try {
-      const result = await googleSignIn();
+      const result = await googleSignIn(true);
       if (result) {
         setToken2(result.accessToken);
         setUser2(result.user);
