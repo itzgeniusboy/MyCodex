@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global safety net catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable, hardened security helpers
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity validation helpers
+    function isValidUserProfile(data) {
+      return data.email is string && data.email.size() <= 200
+          && data.name is string && data.name.size() <= 200
+          && data.avatarUrl is string && data.avatarUrl.size() <= 2000;
+    }
+
+    function isValidChatThread(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.title is string && data.title.size() <= 1000
+          && data.messages is list && data.messages.size() <= 1000;
+    }
+
+    // Match rules for our collections
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUserProfile(incoming());
+      allow delete: if isOwner(userId);
+
+      match /threads/{threadId} {
+        allow get, list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidChatThread(incoming());
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

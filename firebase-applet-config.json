@@ -3,6 +3,7 @@
   "appId": "1:1089444123039:web:194bcffad9624e18e1edaa",
   "apiKey": "AIzaSyDZAzOKScEsffj6-e8Ler8rxTVutyIzNA4",
   "authDomain": "triple-outlook-k07pf.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-9dd5c427-1b71-434e-a400-105feb44eb80",
   "storageBucket": "triple-outlook-k07pf.firebasestorage.app",
   "messagingSenderId": "1089444123039",
   "measurementId": ""

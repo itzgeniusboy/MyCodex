@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public user profile properties.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["email", "name", "avatarUrl"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single chat message in a thread.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "role", "content", "timestamp"]
+    },
+    "ChatThread": {
+      "title": "ChatThread",
+      "description": "Conversation threads synced with cloud storage.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "messages": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "messages", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Main user records including public or secure details"
+    },
+    "/users/{userId}/threads/{threadId}": {
+      "schema": "ChatThread",
+      "description": "Hierarchical conversation database synced per active session"
+    }
+  }
+}

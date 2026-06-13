@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Shield, Mail, ArrowRight, ArrowLeft, Loader2, KeyRound, Sparkles, Lock } from "lucide-react";
+import { X, Mail, ArrowRight, ArrowLeft, Loader2, Lock } from "lucide-react";
 import { UserProfile } from "../types";
+import { googleSignIn } from "../lib/firebase";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isLoggingInWithPassword, setIsLoggingInWithPassword] = useState(false);
+  const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -39,6 +41,36 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
       setSuccessMessage(null);
     }
   }, [isOpen]);
+
+  const handleGoogleSignIn = async () => {
+    setIsGoogleSigningIn(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setSuccessMessage("Authentication verified successfully.");
+        const rawName = result.user.email?.split("@")[0] || "User";
+        const capitalizedName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+        const userProfile = {
+          email: result.user.email || "",
+          name: result.user.displayName || capitalizedName,
+          avatarUrl: result.user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(capitalizedName)}`,
+          isLoggedIn: true,
+          designatedApiKey: `session-verified-token-${btoa(result.user.email || "")}`
+        };
+        setTimeout(() => {
+          onLoginSubmit(userProfile);
+          onClose();
+        }, 800);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage("Google authentication failed. Please try again.");
+    } finally {
+      setIsGoogleSigningIn(false);
+    }
+  };
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,12 +263,12 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.94, y: 15 }}
               transition={{ type: "spring", duration: 0.45, bounce: 0.1 }}
-              className="relative w-full max-w-md overflow-hidden rounded-2xl border border-neutral-800 bg-[#0e0e11] p-6 text-neutral-100 shadow-2xl"
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-neutral-800 bg-[#0e0e11] p-6 text-neutral-100 shadow-2xl"
               id="otp-modal-container"
             >
-              {/* Premium Golden Starburst floating glow in ambient corner */}
-              <div className="absolute -top-12 -right-12 h-40 w-40 bg-amber-500/10 blur-[50px] rounded-full pointer-events-none" />
-              <div className="absolute -bottom-16 -left-16 h-40 w-40 bg-orange-500/5 blur-[55px] rounded-full pointer-events-none" />
+              {/* Premium subtle glowing gradients */}
+              <div className="absolute -top-12 -right-12 h-40 w-40 bg-neutral-800/20 blur-[50px] rounded-full pointer-events-none" />
+              <div className="absolute -bottom-16 -left-16 h-40 w-40 bg-neutral-800/10 blur-[55px] rounded-full pointer-events-none" />
 
               {/* Close Button */}
               <button
@@ -247,21 +279,21 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                 <X className="h-4 w-4" />
               </button>
 
-              {/* Icon Header */}
-              <div className="flex flex-col items-center text-center mt-2 mb-6">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900/90 border border-neutral-800 shadow-lg mb-4 relative overflow-hidden">
+              {/* Header */}
+              <div className="flex flex-col items-center text-center mt-2 mb-5">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900 border border-neutral-800 shadow-lg mb-4 relative overflow-hidden">
                   <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-neutral-700 to-neutral-500" />
                   <Lock className="h-5 w-5 text-neutral-400" />
                 </div>
-                <h3 className="text-xl font-extrabold tracking-tight text-white mb-1.5 justify-center">
-                  PocketCodex Core Access
+                <h3 className="text-lg font-bold tracking-tight text-white mb-1.5 justify-center">
+                  PocketCodex Access
                 </h3>
                 <p className="text-xs text-neutral-400 max-w-xs leading-relaxed">
-                  Provide your email to verify credentials and access your synced multithread dashboards.
+                  Sign in to verify credentials and access your workspace.
                 </p>
               </div>
 
-              {/* Error / Success Alerts */}
+              {/* Errors / Messages */}
               <AnimatePresence mode="popLayout">
                 {errorMessage && (
                   <motion.div
@@ -280,7 +312,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    className="mb-4 rounded-xl border border-amber-500/20 bg-amber-950/20 p-3 text-xs text-amber-400 text-center font-medium"
+                    className="mb-4 rounded-xl border border-neutral-500/20 bg-neutral-950/20 p-3 text-xs text-neutral-400 text-center font-medium"
                     id="otp-success-alert"
                   >
                     {successMessage}
@@ -288,8 +320,50 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                 )}
               </AnimatePresence>
 
+              {/* Prominent Sign In with Google Button */}
+              <div className="mb-5">
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isGoogleSigningIn}
+                  className="w-full flex items-center justify-center gap-3 rounded-xl bg-white hover:bg-neutral-100 p-3 text-xs font-bold text-black border border-transparent transition-all duration-300 disabled:opacity-50 cursor-pointer"
+                  id="google-signin-button"
+                >
+                  {isGoogleSigningIn ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
+                  ) : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                  )}
+                  <span>Sign in with Google</span>
+                </button>
+              </div>
+
+              {/* Elegant Minimal Divider */}
+              <div className="relative flex py-2 items-center mb-5">
+                <div className="flex-grow border-t border-neutral-900"></div>
+                <span className="flex-shrink mx-3 text-[9px] text-neutral-500 font-bold uppercase tracking-widest">or use credentials</span>
+                <div className="flex-grow border-t border-neutral-900"></div>
+              </div>
+
               {/* Login Method Tab Toggles */}
-              <div className="flex gap-2 p-1 bg-neutral-950 rounded-xl border border-neutral-900 mb-6">
+              <div className="flex gap-1.5 p-1 bg-neutral-950 rounded-xl border border-neutral-900 mb-5">
                 <button
                   type="button"
                   onClick={() => {
@@ -298,14 +372,14 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     setErrorMessage(null);
                     setSuccessMessage(null);
                   }}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
                     loginMethod === "otp"
-                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      ? "bg-neutral-950 text-white border border-neutral-800"
                       : "text-neutral-400 hover:text-neutral-200 border border-transparent"
                   }`}
                   id="tab-toggle-otp"
                 >
-                  Gmail OTP
+                  Email OTP
                 </button>
                 <button
                   type="button"
@@ -315,42 +389,41 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     setErrorMessage(null);
                     setSuccessMessage(null);
                   }}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[10px] font-bold rounded-lg tracking-wider uppercase transition-all duration-300 ${
                     loginMethod === "password"
-                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      ? "bg-neutral-950 text-white border border-neutral-800"
                       : "text-neutral-400 hover:text-neutral-200 border border-transparent"
                   }`}
                   id="tab-toggle-password"
                 >
-                  Gmail & Password
+                  Password
                 </button>
               </div>
 
               {/* Transitions Container */}
-              <div className="relative overflow-hidden min-h-[160px]">
+              <div className="relative overflow-hidden min-h-[145px]">
                 <AnimatePresence mode="wait">
                   {loginMethod === "otp" ? (
                     step === 1 ? (
-                      /* Step 1: Input Gmail address */
                       <motion.div
                         key="step-email-input"
-                        initial={{ opacity: 0, x: -15 }}
+                        initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: 15 }}
-                        transition={{ duration: 0.2 }}
-                        className="space-y-4"
+                        exit={{ opacity: 0, x: 10 }}
+                        transition={{ duration: 0.15 }}
+                        className="space-y-3.5"
                       >
-                        <form onSubmit={handleSendOtp} className="space-y-4">
+                        <form onSubmit={handleSendOtp} className="space-y-3.5">
                           <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Email Address</label>
+                            <label className="text-xs font-medium text-neutral-300 block">Email Address</label>
                             <div className="relative">
-                              <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                              <Mail className="absolute left-3 top-3.5 h-4 w-4 text-neutral-500" />
                               <input
                                 type="email"
                                 placeholder="name@example.com"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                                className="w-full rounded-xl bg-neutral-900 py-3 pl-9 pr-3 text-xs border border-neutral-800 text-white placeholder-neutral-500 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 transition-all duration-300"
                                 required
                                 disabled={isSending}
                                 id="otp-email-input"
@@ -361,18 +434,18 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                           <button
                             type="submit"
                             disabled={isSending}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 p-3.5 text-sm font-semibold text-black shadow-lg shadow-amber-500/10 disabled:opacity-50 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 py-3 text-xs font-bold text-black transition-all duration-300 disabled:opacity-50 cursor-pointer"
                             id="otp-send-btn"
                           >
                             {isSending ? (
                               <>
-                                <Loader2 className="h-4 w-4 animate-spin text-black" />
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
                                 Sending...
                               </>
                             ) : (
                               <>
                                 Sign In
-                                <ArrowRight className="h-4 w-4 text-black" />
+                                <ArrowRight className="h-3.5 w-3.5 text-black" />
                               </>
                             )}
                           </button>
@@ -382,27 +455,26 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                       /* Step 2: Verification 1x4 Grid */
                       <motion.div
                         key="step-otp-verify"
-                        initial={{ opacity: 0, x: 15 }}
+                        initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -15 }}
-                        transition={{ duration: 0.2 }}
-                        className="space-y-4"
+                        exit={{ opacity: 0, x: -10 }}
+                        transition={{ duration: 0.15 }}
+                        className="space-y-3.5"
                       >
-                        <form onSubmit={handleVerifyOtp} className="space-y-4">
+                        <form onSubmit={handleVerifyOtp} className="space-y-3.5">
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Verification OTP Code</label>
+                              <label className="text-xs font-medium text-neutral-300 block">Verification Code</label>
                               <button
                                 type="button"
                                 onClick={() => setStep(1)}
-                                className="text-xs text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
+                                className="text-[10px] text-neutral-400 hover:text-neutral-200 flex items-center gap-1 transition"
                               >
-                                <ArrowLeft className="h-3 w-3" /> Change Email
+                                <ArrowLeft className="h-2.5 w-2.5" /> Change Email
                               </button>
                             </div>
 
-                            {/* 4-digit verification grid layout */}
-                            <div className="flex items-center justify-center gap-3 py-2">
+                            <div className="flex items-center justify-center gap-2.5 py-1">
                               {otpArray.map((digit, idx) => (
                                 <input
                                   key={`otp-input-box-${idx}`}
@@ -413,7 +485,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                                   onChange={(e) => handleOtpInput(idx, e.target.value)}
                                   onKeyDown={(e) => handleOtpKeyDown(idx, e)}
                                   onPaste={idx === 0 ? handleOtpPaste : undefined}
-                                  className="w-12 h-14 text-center font-mono text-2xl font-extrabold rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none transition-all duration-300"
+                                  className="w-10 h-12 text-center font-mono text-xl font-bold rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:border-neutral-500 focus:ring-1 focus:ring-neutral-500 focus:outline-none transition-all duration-300"
                                   required
                                   id={`otp-input-field-${idx}`}
                                 />
@@ -421,19 +493,18 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                             </div>
                           </div>
 
-                          {/* Countdown state block */}
-                          <div className="flex items-center justify-between text-xs text-neutral-400 font-medium px-1">
-                            <span>Verified destination: <strong>{email}</strong></span>
+                          <div className="flex items-center justify-between text-[10px] text-neutral-500 font-medium px-0.5">
+                            <span>Sent to: {email}</span>
                             <span>
                               {countdown > 0 ? (
-                                `Code expires in ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}`
+                                `${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}`
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => handleSendOtp()}
-                                  className="text-amber-500 hover:underline hover:text-amber-400 transition"
+                                  className="text-neutral-300 hover:underline transition"
                                 >
-                                  Resend Core OTP
+                                  Resend Code
                                 </button>
                               )}
                             </span>
@@ -442,18 +513,18 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                           <button
                             type="submit"
                             disabled={isVerifying || otpArray.join("").length < 4}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-white hover:bg-neutral-100 py-3.5 text-sm font-semibold text-black transition-all duration-300 disabled:opacity-50"
+                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 py-3 text-xs font-bold text-black transition-all duration-300 disabled:opacity-50 cursor-pointer"
                             id="otp-verify-submit-btn"
                           >
                             {isVerifying ? (
                               <>
-                                <Loader2 className="h-4 w-4 animate-spin text-black" />
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
                                 Verifying...
                               </>
                             ) : (
                               <>
                                 Sign In
-                                <ArrowRight className="h-4 w-4 text-black" />
+                                <ArrowRight className="h-3.5 w-3.5 text-black" />
                               </>
                             )}
                           </button>
@@ -464,23 +535,23 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     /* Password Login Form */
                     <motion.div
                       key="step-password-login"
-                      initial={{ opacity: 0, x: 15 }}
+                      initial={{ opacity: 0, x: 10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -15 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-4"
+                      exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.15 }}
+                      className="space-y-3.5"
                     >
-                      <form onSubmit={handlePasswordLogin} className="space-y-4">
+                      <form onSubmit={handlePasswordLogin} className="space-y-3.5">
                         <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Email Address</label>
+                          <label className="text-xs font-medium text-neutral-300 block">Email Address</label>
                           <div className="relative">
-                            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                            <Mail className="absolute left-3 top-3.5 h-4 w-4 text-neutral-500" />
                             <input
                               type="email"
                               placeholder="name@example.com"
                               value={email}
                               onChange={(e) => setEmail(e.target.value)}
-                              className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                              className="w-full rounded-xl bg-neutral-900 py-3 pl-9 pr-3 text-xs border border-neutral-800 text-white placeholder-neutral-500 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 transition-all duration-300"
                               required
                               disabled={isLoggingInWithPassword}
                               id="password-email-input"
@@ -489,40 +560,40 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-neutral-300 uppercase tracking-wider block">Password</label>
+                          <label className="text-xs font-medium text-neutral-300 block">Password</label>
                           <div className="relative">
-                            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-500" />
+                            <Lock className="absolute left-3 top-3.5 h-4 w-4 text-neutral-500" />
                             <input
                               type="password"
                               placeholder="••••••••"
                               value={password}
                               onChange={(e) => setPassword(e.target.value)}
-                              className="w-full rounded-xl bg-neutral-900 p-3.5 pl-11 text-sm border border-neutral-800 text-white placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-all duration-300"
+                              className="w-full rounded-xl bg-neutral-900 py-3 pl-9 pr-3 text-xs border border-neutral-800 text-white placeholder-neutral-500 focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 transition-all duration-300"
                               required
                               disabled={isLoggingInWithPassword}
                               id="password-input"
                             />
                           </div>
-                          <span className="text-[10px] text-neutral-400 font-medium block">
-                            First login? Choose any password; it will register automatically!
+                          <span className="text-[10px] text-neutral-500 block leading-tight">
+                            First login? Choose any password; it registers automatically.
                           </span>
                         </div>
 
                         <button
                           type="submit"
                           disabled={isLoggingInWithPassword}
-                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 p-3.5 text-sm font-semibold text-black shadow-lg shadow-amber-500/10 disabled:opacity-50 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                          className="w-full flex items-center justify-center gap-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 py-3 text-xs font-bold text-black transition-all duration-300 disabled:opacity-50 cursor-pointer"
                           id="password-login-btn"
                         >
                           {isLoggingInWithPassword ? (
                             <>
-                              <Loader2 className="h-4 w-4 animate-spin text-black" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
                               Signing In...
                             </>
                           ) : (
                             <>
                               Sign In
-                              <ArrowRight className="h-4 w-4 text-black" />
+                              <ArrowRight className="h-3.5 w-3.5 text-black" />
                             </>
                           )}
                         </button>
@@ -532,8 +603,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                 </AnimatePresence>
               </div>
 
-              {/* Safe storage verification disclaimer */}
-              <div className="flex items-center gap-1.5 justify-center mt-6 pt-4 border-t border-neutral-900 text-[10px] text-neutral-500">
+              {/* Flat enterprise disclaimer */}
+              <div className="flex items-center gap-1.5 justify-center mt-5 pt-3.5 border-t border-neutral-900 text-[9px] text-neutral-500">
                 <span>Encrypted secure credential checks in progress</span>
               </div>
             </motion.div>

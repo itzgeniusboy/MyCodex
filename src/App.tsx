@@ -46,6 +46,9 @@ import SettingsModal from "./components/SettingsModal";
 import APIModal from "./components/APIModal";
 import GmailConsoleModal from "./components/GmailConsoleModal";
 import { Message, ChatThread, UserProfile, PresetPrompt } from "./types";
+import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
 // Helper function to prepare code for safe and live-running iframe compilation (transpiles React JSX/TSX code)
 function prepareSandboxCode(rawCode: string, env: "web" | "android" | "chat" = "web"): string {
@@ -1241,50 +1244,163 @@ const PARSER_WORKER_CODE = [
   // Reference for scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- Initialize and LocalStorage Synchronization ---
-  useEffect(() => {
+  // --- Initialize and LocalStorage/Firestore Synchronization ---
+  const loadThreadsFromFirestore = async (userId: string) => {
     try {
-      const userKey = `chat_gpt_ios_threads_${user.email || "guest"}`;
-      const stored = localStorage.getItem(userKey);
-      if (stored) {
-        const parsed: ChatThread[] = JSON.parse(stored);
-        if (parsed.length > 0) {
-          setThreads(parsed);
-          setActiveThreadId(parsed[0].id);
-          lastLoadedUserEmailRef.current = user.email;
-          return;
+      const threadsRef = collection(db, "users", userId, "threads");
+      const querySnapshot = await getDocs(threadsRef);
+      const loadedThreads: ChatThread[] = [];
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        let updatedAtDate: Date;
+        if (data.updatedAt) {
+          updatedAtDate = new Date(data.updatedAt);
+        } else {
+          updatedAtDate = new Date();
         }
-      }
-    } catch (e) {
-      console.error("Failed to load user threads", e);
-    }
 
-    const userName = user.name || "Guest";
-    const initialThread: ChatThread = {
-      id: `welcome-${user.email || "guest"}-${Date.now()}`,
-      title: "Swagat hai! Start here",
-      messages: [
-        {
-          id: `welcome-${Date.now()}`,
-          role: "assistant",
-          content: `Hello ${userName}! Main aapka AI assistant PocketCodex hoon. Main har topic par help kar sakta hoon. Hindi, Hinglish ya English mein kuch bhi puchiye!\n\n💡 **Kuch ideas jise aap try kar sakte hain:**\n- 'Mujhe ek responsive navigation bar banana hai code likho'\n- 'Duniya ka sabse purana sheher kaun sa hai?'\n- 'Generate a sweet birthday greeting for my best friend!'`,
-          timestamp: new Date()
+        const messages = (data.messages || []).map((msg: any) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date(msg.timestamp || Date.now())
+        }));
+
+        loadedThreads.push({
+          id: data.id,
+          title: data.title || "Untitled Conversation",
+          messages,
+          updatedAt: updatedAtDate
+        });
+      });
+
+      loadedThreads.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+      if (loadedThreads.length > 0) {
+        setThreads(loadedThreads);
+        setActiveThreadId(loadedThreads[0].id);
+      }
+    } catch (error) {
+      console.error("Firestore loading error:", error);
+    }
+  };
+
+  const saveThreadToFirestore = async (userId: string, thread: ChatThread) => {
+    const threadPath = `users/${userId}/threads/${thread.id}`;
+    try {
+      const sanitizedThread = {
+        id: thread.id,
+        title: thread.title,
+        updatedAt: thread.updatedAt instanceof Date ? thread.updatedAt.toISOString() : new Date(thread.updatedAt).toISOString(),
+        messages: thread.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : new Date(m.timestamp).toISOString()
+        }))
+      };
+      await setDoc(doc(db, "users", userId, "threads", thread.id), sanitizedThread);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, threadPath);
+    }
+  };
+
+  // Auth recovery listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const rawName = firebaseUser.email?.split("@")[0] || "User";
+        const capitalizedName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+        const profile: UserProfile = {
+          email: firebaseUser.email || "",
+          name: firebaseUser.displayName || capitalizedName,
+          avatarUrl: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(capitalizedName)}`,
+          isLoggedIn: true,
+          designatedApiKey: `session-verified-token-${btoa(firebaseUser.email || "")}`
+        };
+        
+        setUser(profile);
+        localStorage.setItem("chat_gpt_ios_active_user", JSON.stringify(profile));
+        localStorage.setItem("gemini_api_key", profile.designatedApiKey);
+        localStorage.setItem("chat_gpt_ios_custom_key", profile.designatedApiKey);
+
+        // Sync profile to user database
+        try {
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          if (!userDoc.exists()) {
+            await setDoc(userDocRef, {
+              email: profile.email,
+              name: profile.name,
+              avatarUrl: profile.avatarUrl
+            });
+          }
+        } catch (err) {
+          console.error("Firestore user sync error:", err);
         }
-      ],
-      updatedAt: new Date()
-    };
-    setThreads([initialThread]);
-    setActiveThreadId(initialThread.id);
-    lastLoadedUserEmailRef.current = user.email;
-  }, [user.email]);
+
+        // Pull user's conversations
+        await loadThreadsFromFirestore(firebaseUser.uid);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync / Initialize Guest mode
+  useEffect(() => {
+    if (!user.isLoggedIn) {
+      try {
+        const userKey = `chat_gpt_ios_threads_${user.email || "guest"}`;
+        const stored = localStorage.getItem(userKey);
+        if (stored) {
+          const parsed: ChatThread[] = JSON.parse(stored);
+          if (parsed.length > 0) {
+            setThreads(parsed);
+            setActiveThreadId(parsed[0].id);
+            lastLoadedUserEmailRef.current = user.email;
+            return;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load guest threads", e);
+      }
+
+      const userName = user.name || "Guest";
+      const initialThread: ChatThread = {
+        id: `welcome-${user.email || "guest"}-${Date.now()}`,
+        title: "Swagat hai! Start here",
+        messages: [
+          {
+            id: `welcome-${Date.now()}`,
+            role: "assistant",
+            content: `Hello ${userName}! Main aapka AI assistant PocketCodex hoon. Main har topic par help kar sakta hoon. Hindi, Hinglish ya English mein kuch bhi puchiye!\n\n💡 **Kuch ideas jise aap try kar sakte hain:**\n- 'Mujhe ek responsive navigation bar banana hai code likho'\n- 'Duniya ka sabse purana sheher kaun sa hai?'\n- 'Generate a sweet birthday greeting for my best friend!'`,
+            timestamp: new Date()
+          }
+        ],
+        updatedAt: new Date()
+      };
+      setThreads([initialThread]);
+      setActiveThreadId(initialThread.id);
+      lastLoadedUserEmailRef.current = user.email;
+    }
+  }, [user.email, user.isLoggedIn]);
 
   // Save changes automatically
   useEffect(() => {
     if (threads.length > 0 && lastLoadedUserEmailRef.current === user.email) {
       const userKey = `chat_gpt_ios_threads_${user.email || "guest"}`;
       localStorage.setItem(userKey, JSON.stringify(threads));
+
+      // Backup active thread to cloud in real-time
+      if (user.isLoggedIn && auth.currentUser) {
+        const activeThread = threads.find((t) => t.id === activeThreadId);
+        if (activeThread) {
+          saveThreadToFirestore(auth.currentUser.uid, activeThread);
+        }
+      }
     }
-  }, [threads, user.email]);
+  }, [threads, user.email, user.isLoggedIn, activeThreadId]);
 
   // Save active user profile configuration to localStorage automatically
   useEffect(() => {
@@ -1355,11 +1471,20 @@ const PARSER_WORKER_CODE = [
     setActiveThreadId(newId);
   };
 
-  const handleDeleteThread = (id: string, e: React.MouseEvent) => {
+  const handleDeleteThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     triggerHapticFeedback();
     const updated = threads.filter((t) => t.id !== id);
     setThreads(updated);
+
+    // Delete thread document from Firestore if authenticated
+    if (user.isLoggedIn && auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, "users", auth.currentUser.uid, "threads", id));
+      } catch (error) {
+        console.error("Failed to delete thread from firestore", error);
+      }
+    }
     
     if (activeThreadId === id) {
       if (updated.length > 0) {
@@ -1378,9 +1503,23 @@ const PARSER_WORKER_CODE = [
     }
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     triggerHapticFeedback();
     localStorage.removeItem("chat_gpt_ios_threads_" + (user.email || "guest"));
+
+    // Deep-clean history inside Firestore if authenticated
+    if (user.isLoggedIn && auth.currentUser) {
+      try {
+        const threadsRef = collection(db, "users", auth.currentUser.uid, "threads");
+        const snapshot = await getDocs(threadsRef);
+        for (const docSnap of snapshot.docs) {
+          await deleteDoc(doc(db, "users", auth.currentUser.uid, "threads", docSnap.id));
+        }
+      } catch (error) {
+        console.error("Failed to clear firestore history", error);
+      }
+    }
+
     const clearedId = `thread-${Date.now()}`;
     const defaultThread: ChatThread = {
       id: clearedId,
