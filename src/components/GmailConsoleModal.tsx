@@ -356,7 +356,7 @@ Snippet: ${mail.snippet}`;
                             ))}
                           </div>
 
-                          <div className="space-y-1 text-[11px] text-neutral-400 leading-relaxed border-t border-neutral-800/40 pt-2 font-normal">
+                           <div className="space-y-1 text-[11px] text-neutral-400 leading-relaxed border-t border-neutral-800/40 pt-2 font-normal">
                             <p className="font-semibold text-neutral-300">Quick Setup Instructions:</p>
                             <ol className="list-decimal list-inside space-y-1 pl-1 text-[10px]">
                               <li>
@@ -366,6 +366,22 @@ Snippet: ${mail.snippet}`;
                               <li>Click <strong className="text-neutral-300">Authorized domains</strong> in the side sub-panel.</li>
                               <li>Click <strong className="text-neutral-300">Add domain</strong> and paste the copied domain(s).</li>
                             </ol>
+                          </div>
+                        </div>
+                      ) : (emailFetchError.toLowerCase().includes("sessionstorage") || emailFetchError.toLowerCase().includes("initial state") || emailFetchError.toLowerCase().includes("storage-partition") || emailFetchError.toLowerCase().includes("storage-unsupported")) ? (
+                        <div className="text-left space-y-3">
+                          <div className="flex items-center gap-2 text-amber-400 font-bold">
+                            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                            <span>Browser Blocked Storage (Safari/Brave)</span>
+                          </div>
+                          <p className="text-[11px] text-neutral-300 leading-relaxed font-normal">
+                            Aapke browser ne cross-site tracking ya cookies block kiye hain (galti se Safari/Brave me auto-block ho jata h), jiske wajah se Google Sign-In support nahi kar raha.
+                          </p>
+                          <div className="space-y-1.5 p-2.5 bg-[#0e0a05] rounded-lg border border-amber-950/40 text-[10px] text-neutral-300 font-normal">
+                            <p className="font-semibold text-amber-400 font-sans">Isse Kaise Fix Karein:</p>
+                            <ul className="list-disc list-inside space-y-1 pl-0.5">
+                              <li><strong>iPhone (Safari) Settings me:</strong> Settings &gt; Safari &gt; <span className="text-amber-300 font-medium font-sans">"Prevent Cross-Site Tracking"</span> ko <strong className="text-white font-sans">OFF</strong> karein, fir page refresh karein!</li>
+                            </ul>
                           </div>
                         </div>
                       ) : (

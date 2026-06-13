@@ -370,6 +370,23 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                           </ol>
                         </div>
                       </div>
+                    ) : (errorMessage.toLowerCase().includes("sessionstorage") || errorMessage.toLowerCase().includes("initial state") || errorMessage.toLowerCase().includes("storage-partition") || errorMessage.toLowerCase().includes("storage-unsupported")) ? (
+                      <div className="text-left space-y-3">
+                        <div className="flex items-center gap-2 text-amber-400 font-bold">
+                          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                          <span>Browser Blocked Storage (Safari/Brave)</span>
+                        </div>
+                        <p className="text-[11px] text-neutral-300 leading-relaxed font-normal">
+                          Aapke browser ne cross-site tracking ya cookies block kiye hain (galti se Safari/Brave me auto-block ho jata h), jiske wajah se Google Sign-In support nahi kar raha.
+                        </p>
+                        <div className="space-y-1.5 p-2.5 bg-[#0e0a05] rounded-lg border border-amber-950/40 text-[10px] text-neutral-300 font-normal">
+                          <p className="font-semibold text-amber-400">Isse Kaise Fix Karein:</p>
+                          <ul className="list-disc list-inside space-y-1 pl-0.5">
+                            <li><strong>iPhone (Safari) Settings me:</strong> Settings &gt; Safari &gt; <span className="text-amber-300 font-medium">"Prevent Cross-Site Tracking"</span> ko <strong className="text-white">OFF</strong> karein, fir page refresh karein!</li>
+                            <li><strong>Alternate Option (Bina Google k):</strong> Nichay se <strong className="text-white">EMAIL OTP</strong> ya <strong className="text-white">PASSWORD</strong> options ka use karein. Wo smoothly work karenge!</li>
+                          </ul>
+                        </div>
+                      </div>
                     ) : (
                       <div className="text-center">{errorMessage}</div>
                     )}
