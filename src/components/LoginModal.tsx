@@ -66,7 +66,9 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMessage("Google authentication failed. Please try again.");
+      const exactCode = err?.code ? ` [Code: ${err.code}]` : "";
+      const exactMessage = err?.message || "Unknown error";
+      setErrorMessage(`Google authentication failed: ${exactMessage}${exactCode}. Please check Google Console authorized domains if needed.`);
     } finally {
       setIsGoogleSigningIn(false);
     }

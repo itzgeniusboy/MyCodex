@@ -95,7 +95,9 @@ export default function GmailConsoleModal({
       }
     } catch (err: any) {
       console.error(err);
-      setEmailFetchError("Failed Google Auth popup credentials. Please accept the permissions requested.");
+      const exactCode = err?.code ? ` [Code: ${err.code}]` : "";
+      const exactMessage = err?.message || "Unknown error";
+      setEmailFetchError(`Failed Google Auth: ${exactMessage}${exactCode}. Please check Google Cloud Console authorized domains if needed.`);
     } finally {
       setIsAuthorizing(false);
     }
