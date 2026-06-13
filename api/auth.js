@@ -8,6 +8,6 @@ export default function handler(req, res) {
   }
   
   const state = Math.random().toString(36).substring(7);
-  const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=repo&state=${state}`;
+  const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=repo,workflow&state=${state}`;
   return res.redirect(authUrl);
 }

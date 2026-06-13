@@ -523,6 +523,30 @@ const PRESET_PROMPTS: PresetPrompt[] = [
   }
 ];
 
+function TerminalTimerLines() {
+  const [text, setText] = useState("Initializing PocketCodex Core...");
+  
+  useEffect(() => {
+    const sequence = [
+      { t: 400, m: "Initializing PocketCodex Core..." },
+      { t: 900, m: "Contacting serverless auth microservice..." },
+      { t: 1400, m: "Loading multi-thread active workspaces..." },
+      { t: 1900, m: "Establishing secure session sockets..." },
+      { t: 2300, m: "PocketCodex online." }
+    ];
+
+    const timers = sequence.map(step => {
+      return setTimeout(() => {
+        setText(step.m);
+      }, step.t);
+    });
+
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  return <span>{text}</span>;
+}
+
 export default function App() {
   // --- Core State Machine ---
   const [threads, setThreads] = useState<ChatThread[]>([]);
@@ -544,6 +568,7 @@ export default function App() {
     return [];
   };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [introLoading, setIntroLoading] = useState(true);
 
   // --- UI Layout state ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -588,6 +613,27 @@ export default function App() {
   const [sandboxEngineType, setSandboxEngineType] = useState<"React.js (Vite Bundle)" | "Static HTML5" | "Documentation Engine">("React.js (Vite Bundle)");
   const [showInspectorPanel, setShowInspectorPanel] = useState(false);
   const [inspectorLogOutput, setInspectorLogOutput] = useState<string[]>([]);
+
+  // Intro loader timeout and authentication gateway triggers
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIntroLoading(false);
+      try {
+        const stored = localStorage.getItem("chat_gpt_ios_active_user");
+        let loggedIn = false;
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          loggedIn = !!parsed.isLoggedIn;
+        }
+        if (!loggedIn) {
+          setIsLoginOpen(true);
+        }
+      } catch (e) {
+        setIsLoginOpen(true);
+      }
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Simulation compilation lifecycles handler
   useEffect(() => {
@@ -1481,7 +1527,8 @@ const PARSER_WORKER_CODE = [
         currentEmail = "Primary Config";
       }
 
-      const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || currentToken.startsWith("AIzaSy") || currentToken.startsWith("mock-token") || currentToken.startsWith("mock-custom-token");
+      const savedApiKey = localStorage.getItem("gemini_api_key") || localStorage.getItem("chat_gpt_ios_custom_key") || engine.apiKey || "";
+      const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || savedApiKey.startsWith("AIzaSy") || savedApiKey.startsWith("mock-token") || savedApiKey.startsWith("mock-custom-token");
 
       try {
         let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
@@ -1498,7 +1545,7 @@ const PARSER_WORKER_CODE = [
           }
         }
 
-        if (isGeminiFamily && currentToken) {
+        if (isGeminiFamily) {
           // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
           const modelsToTry = [
             selectedModel,
@@ -1515,12 +1562,7 @@ const PARSER_WORKER_CODE = [
               "Content-Type": "application/json"
             };
 
-            if (currentToken.startsWith("AIzaSy")) {
-              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentToken}`;
-            } else {
-              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`;
-              headers["Authorization"] = `Bearer ${currentToken}`;
-            }
+            apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${savedApiKey}`;
             
             let payload: any = null;
             if (projectEnv === "chat") {
@@ -1535,10 +1577,46 @@ const PARSER_WORKER_CODE = [
               };
             } else {
               // Normal system context generation payloads
-              const contents = apiMessages.map(m => ({
-                role: m.role === "assistant" ? "model" : "user",
-                parts: [{ text: m.content }]
-              }));
+              const sanitizeGeminiContents = (rawMessages: any[]) => {
+                const mapped = rawMessages
+                  .filter(m => m && m.content && m.content.trim() !== "")
+                  .map(m => {
+                    const role = (m.role === "assistant" || m.role === "model") ? "model" : "user";
+                    return {
+                      role,
+                      text: m.content.trim()
+                    };
+                  });
+
+                if (mapped.length === 0) {
+                  return [];
+                }
+
+                const cleaned: any[] = [];
+                let currentGroup = mapped[0];
+
+                for (let i = 1; i < mapped.length; i++) {
+                  const nextMsg = mapped[i];
+                  if (nextMsg.role === currentGroup.role) {
+                    currentGroup.text += "\n\n" + nextMsg.text;
+                  } else {
+                    cleaned.push(currentGroup);
+                    currentGroup = nextMsg;
+                  }
+                }
+                cleaned.push(currentGroup);
+
+                while (cleaned.length > 0 && cleaned[0].role !== "user") {
+                  cleaned.shift();
+                }
+
+                return cleaned.map(item => ({
+                  role: item.role,
+                  parts: [{ text: item.text }]
+                }));
+              };
+
+              const contents = sanitizeGeminiContents(apiMessages);
 
               let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
               
@@ -1609,7 +1687,7 @@ const PARSER_WORKER_CODE = [
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               messages: apiMessages,
-              customApiKey: currentToken,
+              customApiKey: savedApiKey,
               activeEngine: engine,
               projectEnv: projectEnv,
               gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
@@ -1800,10 +1878,68 @@ const PARSER_WORKER_CODE = [
   }, [mainTab, activeMessages]);
 
   return (
-    <div 
-      id="app-root-viewport"
-      className="fixed inset-0 w-full flex flex-col md:flex-row overflow-hidden bg-[#0c0d0e] text-neutral-100 font-sans"
-    >
+    <>
+      <AnimatePresence>
+        {introLoading && (
+          <motion.div
+            key="pocketcodex-loader-screen"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            transition={{ duration: 0.6, ease: "easeInOut" }}
+            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#070709] text-white p-6 overflow-hidden select-none"
+          >
+            {/* Ambient Background Matrix Dots */}
+            <div className="absolute inset-0 bg-[radial-gradient(#1c1c22_1px,transparent_1px)] [background-size:16px_16px] opacity-25 pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
+              {/* Outer Amber pulse ring & logo container */}
+              <div className="relative mb-6 flex items-center justify-center h-20 w-20">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-amber-500/10 animate-ping opacity-60" />
+                <span className="absolute inline-flex h-[130%] w-[130%] rounded-full bg-orange-500/5 animate-pulse opacity-25" />
+                
+                {/* Main spinning loader bezel */}
+                <div className="absolute inset-0 rounded-full border-2 border-dashed border-amber-500/30 animate-spin [animation-duration:12s]" />
+
+                {/* Inner stylized chip logo icon */}
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-900 border border-amber-500/30 p-2 shadow-2xl relative overflow-hidden">
+                  <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
+                  <Cpu className="h-7 w-7 text-amber-500 animate-pulse" />
+                </div>
+              </div>
+
+              {/* Title & subtitle */}
+              <h2 className="text-xl font-black uppercase tracking-widest text-[#f5f5f7] mb-1 flex items-center gap-1">
+                POCKETCODEX <span className="text-[#ff5500] font-sans font-normal text-xs tracking-normal normal-case border border-[#ff5500]/30 px-1.5 rounded-md bg-[#ff5500]/5">v1.2.8</span>
+              </h2>
+              <p className="text-[10px] uppercase tracking-widest font-mono text-neutral-500 mb-6">
+                Microarchitecture Sandbox Compiler
+              </p>
+
+              {/* Loader bars */}
+              <div className="w-48 h-[3px] bg-neutral-900/60 rounded-full overflow-hidden border border-neutral-800/80 mb-3 relative">
+                <motion.div
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 2.3, ease: "easeInOut" }}
+                  className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full"
+                />
+              </div>
+
+              {/* Live console logging effect */}
+              <div className="h-10 flex flex-col items-center justify-center font-mono text-[10px] text-amber-400/80 tracking-tight leading-relaxed">
+                <span className="animate-pulse">
+                  <TerminalTimerLines />
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div 
+        id="app-root-viewport"
+        className="fixed inset-0 w-full flex flex-col md:flex-row overflow-hidden bg-[#0c0d0e] text-neutral-100 font-sans"
+      >
       {/* 1. Sidebar Panel Drawer */}
       <Sidebar
         isOpen={isSidebarOpen}
@@ -2918,6 +3054,7 @@ const PARSER_WORKER_CODE = [
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }
 
