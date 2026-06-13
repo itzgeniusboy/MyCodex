@@ -50,9 +50,111 @@ async function startServer() {
 
   app.use(express.json());
 
+  // GitHub Dynamic Auth Route for local server
+  app.get("/api/auth", (req, res) => {
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    if (!clientId) {
+      // Fallback redirect to local mock popup
+      return res.redirect("/auth/github/popup");
+    }
+    const state = Math.random().toString(36).substring(7);
+    const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=repo&state=${state}`;
+    res.redirect(authUrl);
+  });
+
+  // GitHub Dynamic OAuth Callback for local server
+  app.get("/api/callback", async (req, res) => {
+    const { code } = req.query;
+    if (!code) {
+      return res.status(400).send("Missing authorization details.");
+    }
+
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      return res.status(500).send("GitHub client credentials missing on server.");
+    }
+
+    try {
+      const response = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: code
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Exchange request failed: ${response.status}`);
+      }
+
+      const data: any = await response.json();
+      const token = data.access_token;
+
+      if (!token) {
+        return res.status(400).send("Access token not returned by GitHub: " + JSON.stringify(data));
+      }
+
+      res.setHeader("Content-Type", "text/html");
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Authentication Successful</title>
+            <style>
+              body {
+                background-color: #0c0c0e;
+                color: #f4f4f5;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                font-family: system-ui, -apple-system, sans-serif;
+                margin: 0;
+              }
+              .card {
+                background-color: #121214;
+                border: 1px solid #27272a;
+                border-radius: 12px;
+                padding: 24px;
+                text-align: center;
+                max-width: 320px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h3 style="color: #10b981; margin-top: 0;">Connected Successfully</h3>
+              <p style="font-size: 13px; color: #a1a1aa; line-height: 1.5;">Your GitHub account has been authenticated. Closing this window...</p>
+            </div>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ token: '${token}' }, '*');
+                setTimeout(() => {
+                  window.close();
+                }, 1200);
+              } else {
+                document.querySelector('p').innerText = "Authentication setup successfully, but client opener was not found!";
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).send("Exchange execution error: " + err.message);
+    }
+  });
+
   // GitHub Authorization Pop-up URL API
   app.get("/api/auth/github/url", (req, res) => {
-    res.json({ url: "/auth/github/popup" });
+    res.json({ url: "/api/auth" });
   });
 
   // Simple HTML Pop-up Page for simulated/direct credentials input
@@ -69,28 +171,27 @@ async function startServer() {
       </head>
       <body class="min-h-screen flex items-center justify-center p-6">
         <div class="w-full max-w-sm bg-[#121214] border border-neutral-800 rounded-2xl p-6 shadow-2xl text-center space-y-5">
-          <div class="h-12 w-12 mx-auto bg-amber-500/10 border border-amber-500/20 text-lg flex items-center justify-center rounded-xl">
+          <div class="h-12 w-12 mx-auto bg-amber-500/10 border border-amber-500/20 text-lg flex items-center justify-center rounded-xl font-sans">
              🐙
           </div>
           <div class="space-y-1">
-            <h1 class="text-sm font-bold text-white">OAuth Workspace Connection</h1>
-            <p class="text-[11px] text-neutral-400">Connect your account securely to enable real-time commit pushes and read file context.</p>
+            <h1 class="text-sm font-bold text-white uppercase tracking-wider font-sans">1-Click Sandbox Link</h1>
+            <p class="text-[11px] text-neutral-400 font-sans leading-normal">Configure high-fidelity simulated session since local secret keys are pending gateway credentials.</p>
           </div>
           
           <div class="space-y-3 pt-1 text-left">
             <div>
-              <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-400 block mb-1">GitHub Username</label>
-              <input id="github-username" type="text" placeholder="e.g. itzgeniusboy" value="viking" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700" />
+              <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-500 block mb-1 font-sans">GitHub Username</label>
+              <input id="github-username" type="text" placeholder="e.g. itzgeniusboy" value="viking" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
             </div>
             <div>
-              <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-400 block mb-1">GitHub Personal Access Token (Optional)</label>
-              <input id="github-token" type="password" placeholder="ghp_..." class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700" />
-              <p class="text-[8px] text-neutral-500 mt-1 leading-normal">Required only for pushing real commits to your own repositories. Leave empty to use high-fidelity sandbox workspace file mode.</p>
+              <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-400 block mb-1 font-sans">GitHub Token</label>
+              <input id="github-token" type="password" placeholder="gho_oauth_access_token..." value="mock_oauth_secret_token" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
             </div>
           </div>
           
-          <button id="connect-btn" class="w-full bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-neutral-950 text-xs font-bold py-2.5 rounded-xl transition">
-            ⚡ Complete Secure Authorization
+          <button id="connect-btn" class="w-full bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-neutral-950 text-xs font-bold py-2.5 rounded-xl transition cursor-pointer font-sans uppercase">
+            ⚡ Link Secure Session
           </button>
         </div>
         
@@ -227,80 +328,170 @@ async function startServer() {
     }
   });
 
-  // Commit and write code changes locally or push to Real/Mock GitHub Repository
+  // Commit and write code changes locally or push to Real/Mock GitHub Repository (supports multi-file sync)
   app.post("/api/github/push", async (req, res) => {
     try {
-      const { repo, username, token, filename, content, commitMsg } = req.body;
-      if (!filename || !content) {
-        return res.status(400).json({ error: "Filename and content are required." });
+      const { repo, username, token, filename, content, files: bodyFiles, commitMsg } = req.body;
+      
+      // Parse array of files to process
+      const filesToCommit: { filename: string; content: string }[] = [];
+      if (Array.isArray(bodyFiles)) {
+        filesToCommit.push(...bodyFiles);
+      } else if (filename && content) {
+        filesToCommit.push({ filename: String(filename), content: String(content) });
+      }
+
+      if (filesToCommit.length === 0) {
+        return res.status(400).json({ error: "No files or contents were provided for sync push." });
       }
       
-      const fileStr = String(filename);
-      const commitMessage = commitMsg || `Synced changes for ${fileStr} via PocketCodex Workspace`;
+      const commitMessage = commitMsg || `Synced ${filesToCommit.length} file(s) via autonomous Workspace loop`;
       
-      // 1. Write locally so they are persistent and compiled into our Live Preview instantly
-      const localPath = path.join(process.cwd(), fileStr);
-      try {
-        const folder = path.dirname(localPath);
-        if (!fs.existsSync(folder)) {
-          fs.mkdirSync(folder, { recursive: true });
+      // 1. Write files locally inside container for instant live environment compilation
+      for (const item of filesToCommit) {
+        const fileStr = String(item.filename);
+        const localPath = path.join(process.cwd(), fileStr);
+        try {
+          const folder = path.dirname(localPath);
+          if (!fs.existsSync(folder)) {
+            fs.mkdirSync(folder, { recursive: true });
+          }
+          fs.writeFileSync(localPath, item.content, "utf-8");
+          console.log(`Synced file locally inside container: ${localPath}`);
+        } catch (localWriteErr) {
+          console.warn("Local storage write skipped:", localWriteErr);
         }
-        fs.writeFileSync(localPath, content, "utf-8");
-        console.log(`Synced file locally inside container: ${localPath}`);
-      } catch (localWriteErr) {
-        console.warn("Local storage write skipped:", localWriteErr);
       }
       
-      // 2. Push to GitHub if configured
+      // 2. Commit and push directly to GitHub if authenticated
       if (token && token !== "mock-token" && username && repo) {
         try {
-          let existingSha = "";
-          const getShaRes = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${fileStr}`, {
+          // A. Determine active branch and fetch its latest commit
+          let activeBranch = "main";
+          let refRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/ref/heads/main`, {
             headers: {
               "Authorization": `Bearer ${token}`,
               "Accept": "application/vnd.github.v3+json",
               "User-Agent": "pocket-codex-app"
             }
           });
-          if (getShaRes.ok) {
-            const fileData: any = await getShaRes.json();
-            existingSha = fileData.sha || "";
-          }
           
-          const base64Content = Buffer.from(content).toString("base64");
-          const putBody: any = {
-            message: commitMessage,
-            content: base64Content
-          };
-          if (existingSha) {
-            putBody.sha = existingSha;
+          if (!refRes.ok) {
+            // Fallback to master if main doesn't exist yet
+            refRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/ref/heads/master`, {
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "pocket-codex-app"
+              }
+            });
+            if (refRes.ok) {
+              activeBranch = "master";
+            }
           }
-          
-          const putRes = await fetch(`https://api.github.com/repos/${username}/${repo}/contents/${fileStr}`, {
-            method: "PUT",
+
+          if (!refRes.ok) {
+            throw new Error(`Unable to find 'main' or 'master' branch references in this repo.`);
+          }
+
+          const refData: any = await refRes.json();
+          const lastCommitSha = refData.object.sha;
+
+          // B. Get father commit's tree SHA
+          const commitDetailRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/commits/${lastCommitSha}`, {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Accept": "application/vnd.github.v3+json",
+              "User-Agent": "pocket-codex-app"
+            }
+          });
+          if (!commitDetailRes.ok) {
+            throw new Error(`Failed to fetch commit details for SHA ${lastCommitSha}`);
+          }
+          const commitDetail: any = await commitDetailRes.json();
+          const baseTreeSha = commitDetail.tree.sha;
+
+          // C. Build the new git tree structure with the files array
+          const treeItems = filesToCommit.map(item => ({
+            path: item.filename,
+            mode: "100644",
+            type: "blob",
+            content: item.content
+          }));
+
+          const createTreeRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/trees`, {
+            method: "POST",
             headers: {
               "Authorization": `Bearer ${token}`,
               "Accept": "application/vnd.github.v3+json",
               "Content-Type": "application/json",
               "User-Agent": "pocket-codex-app"
             },
-            body: JSON.stringify(putBody)
+            body: JSON.stringify({
+              base_tree: baseTreeSha,
+              tree: treeItems
+            })
           });
-          
-          if (putRes.ok) {
-            const putData: any = await putRes.json();
-            const commitSha = putData.commit?.sha?.substring(0, 7) || "a1b2c3d";
-            return res.json({ 
-              status: "success", 
-              filename: fileStr, 
-              sha: commitSha, 
-              branch: "main", 
-              message: "Synced to GitHub successfully" 
-            });
-          } else {
-            const putErrText = await putRes.text();
-            throw new Error(`GitHub API returned error: ${putErrText}`);
+
+          if (!createTreeRes.ok) {
+            const createTreeErrTxt = await createTreeRes.text();
+            throw new Error(`GitHub Create Tree API Error: ${createTreeErrTxt}`);
           }
+          const newTreeData: any = await createTreeRes.json();
+          const newTreeSha = newTreeData.sha;
+
+          // D. Create a new commit referencing the tree and father commit parent
+          const createCommitRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/commits`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Accept": "application/vnd.github.v3+json",
+              "Content-Type": "application/json",
+              "User-Agent": "pocket-codex-app"
+            },
+            body: JSON.stringify({
+              message: commitMessage,
+              tree: newTreeSha,
+              parents: [lastCommitSha]
+            })
+          });
+
+          if (!createCommitRes.ok) {
+            const commitErrTxt = await createCommitRes.text();
+            throw new Error(`GitHub Create Commit API Error: ${commitErrTxt}`);
+          }
+          const newCommitData: any = await createCommitRes.json();
+          const newCommitSha = newCommitData.sha;
+
+          // E. Update reference to trigger live production branch head forward
+          const updateRefRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/refs/heads/${activeBranch}`, {
+            method: "PATCH",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Accept": "application/vnd.github.v3+json",
+              "Content-Type": "application/json",
+              "User-Agent": "pocket-codex-app"
+            },
+            body: JSON.stringify({
+              sha: newCommitSha,
+              force: true
+            })
+          });
+
+          if (!updateRefRes.ok) {
+            const updateRefErrTxt = await updateRefRes.text();
+            throw new Error(`GitHub Update Reference API Error: ${updateRefErrTxt}`);
+          }
+
+          const shortSha = newCommitSha.substring(0, 7);
+          return res.json({
+            status: "success",
+            files: filesToCommit.map(f => f.filename),
+            sha: shortSha,
+            branch: activeBranch,
+            message: `Committed ${filesToCommit.length} file(s) synchronously to GitHub!`
+          });
+
         } catch (gitErr: any) {
           console.error("GitHub API commit error:", gitErr);
           return res.status(500).json({ error: gitErr.message || "Failed to commit to GitHub" });
@@ -310,7 +501,7 @@ async function startServer() {
       const mockSha = Math.random().toString(16).substring(2, 9);
       res.json({
         status: "success",
-        filename: fileStr,
+        files: filesToCommit.map(f => f.filename),
         sha: mockSha,
         branch: "main",
         message: "Synced locally to workspace container"
@@ -448,15 +639,15 @@ async function startServer() {
           systemInstruction += `\n\n[Active GitHub Workspace context]:\nRepository: ${gitContext.repo}\nActive Target File: ${gitContext.filename}\n\nHere is the existing code inside ${gitContext.filename}:\n\n\`\`\`\n${gitContext.content}\n\`\`\`\n\nAnalyze this code. If you are asked to make changes, write code, or rewrite, perform a full Coadex-style Rewrite pass of the file, outputting the complete revised file content wrapped in a clean markdown code block, so it can be seamlessly committed/pushed straight to GitHub.`;
         }
 
-        let modelName = "gemini-1.5-flash";
+        let modelName = "gemini-3.5-flash";
         const provLower = provider ? provider.toLowerCase() : "";
         if (provLower.includes("pro")) {
-          modelName = "gemini-1.5-pro";
+          modelName = "gemini-3.1-pro-preview";
         } else if (provLower.includes("flash")) {
-          modelName = "gemini-1.5-flash";
+          modelName = "gemini-3.5-flash";
         }
 
-        const modelsToTry = [modelName, "gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"];
+        const modelsToTry = [modelName, "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-pro-preview"];
         let responseData: any = null;
         let lastError = null;
 

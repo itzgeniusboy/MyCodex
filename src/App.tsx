@@ -343,23 +343,9 @@ function prepareSandboxCode(rawCode: string, env: "web" | "android" | "chat" = "
               <span class="text-[9px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-3 py-1 rounded-full font-mono font-bold">viewer.md</span>
             </div>
 
-            \${(isError && "${env}" !== "web") ? \`
-              <div class="flex flex-col items-center justify-center min-h-[300px] text-center p-8 bg-[#0a0a0c] rounded-2xl border border-neutral-900 mx-auto max-w-sm my-4">
-                <div class="h-12 w-12 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-4">
-                  <span class="text-xl">⚙️</span>
-                </div>
-                <h3 class="text-white text-sm font-semibold tracking-wide">Developer Presentation Mode</h3>
-                <p class="text-xs text-neutral-400 mt-2 leading-relaxed max-w-xs">
-                  A rendering trace has been safely routed to the side dashboard. Please check the 
-                  <strong class="text-amber-500 font-bold">Inspect Build</strong> 
-                  tab for live diagnostics.
-                </p>
-              </div>
-            \` : \`
-              <div class="markdown-body">
-                \${parsedHtml}
-              </div>
-            \`}
+            <div class="markdown-body">
+              \${parsedHtml}
+            </div>
           </div>
         \`;
         
@@ -644,8 +630,7 @@ export default function App() {
         setInspectorLogOutput([
           `⚠️ Error: ${cleanMsg}${lineStr}`
         ]);
-        // Bring visual context to compilation status failing
-        setShowInspectorPanel(true);
+        // Intercept compilation internally in the background
       }
     };
     window.addEventListener("message", handleSandboxMessage);
@@ -662,30 +647,54 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState("");
   const [selectedFileContent, setSelectedFileContent] = useState("");
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [syncingFilesCount, setSyncingFilesCount] = useState<number>(0);
 
-  // Secure GitHub connection popup launcher
-  const handleConnectGitHub = async () => {
+  // Secure GitHub connection popup launcher targeting /api/auth directly
+  const handleConnectGitHub = () => {
     triggerHapticFeedback();
-    try {
-      const res = await fetch("/api/auth/github/url");
-      if (res.ok) {
-        const { url } = await res.json();
-        const popup = window.open(
-          url,
-          "github_oauth_popup",
-          "width=480,height=620,top=120,left=120"
-        );
-        if (!popup) {
-          alert("Pop-up blocker is active. Please enable popups to authenticate GitHub!");
-        }
-      }
-    } catch (e) {
-      console.error("Error launching secure GitHub popup:", e);
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    
+    const popup = window.open(
+      "/api/auth",
+      "github_oauth_popup",
+      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
+    );
+    if (!popup) {
+      alert("Pop-up blocker is active. Please enable popups to authenticate GitHub!");
     }
   };
 
-  // Safe repositories loader
+  // Safe repositories loader fetching 100 repositories directly with token
   const loadGitHubRepos = async (username: string, token: string) => {
+    try {
+      const res = await fetch("https://api.github.com/user/repos?per_page=100", {
+        headers: {
+          "Authorization": `token ${token}`,
+          "Accept": "application/vnd.github.v3+json"
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const repoNames = data.map((r: any) => r.name);
+          setGitHubRepos(repoNames);
+          if (repoNames.length > 0) {
+            const firstRepo = repoNames[0];
+            setSelectedRepo(firstRepo);
+            loadRepoFiles(firstRepo, username, token);
+          }
+          setGitHubConnectedState("connected");
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Error downloading repos list from GitHub API directly:", e);
+    }
+
+    // Try server routing proxy if client directly hits CORS or preflight issues on other endpoints
     try {
       const res = await fetch(`/api/github/repos?username=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`);
       if (res.ok) {
@@ -702,8 +711,9 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.error("Error downloading repos list:", e);
+      console.error("Server proxy fallbacks fail:", e);
     }
+
     // High-fidelity fallback repositories list
     const fallbackRepos = ["portfolio-site", "react-haptics-sandbox", "pocket-codex-core", "vercel-slate-theme", "ios-chatgpt-clone"];
     setGitHubRepos(fallbackRepos);
@@ -712,25 +722,54 @@ export default function App() {
     loadRepoFiles(fallbackRepos[0], username, token);
   };
 
-  // Safe file tree scanner
+  // Safe file tree scanner and recursive repository context mapping
   const loadRepoFiles = async (repo: string, username: string, token: string) => {
     setIsLoadingFiles(true);
+    // Try client-side direct recursive Git Trees fetch if token is available
+    if (token && token !== "mock-token" && username && repo) {
+      try {
+        let treeRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/trees/main?recursive=1`, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Accept": "application/vnd.github.v3+json"
+          }
+        });
+        if (!treeRes.ok) {
+          // Fallback to master branch
+          treeRes = await fetch(`https://api.github.com/repos/${username}/${repo}/git/trees/master?recursive=1`, {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Accept": "application/vnd.github.v3+json"
+            }
+          });
+        }
+        if (treeRes.ok) {
+          const data = await treeRes.json();
+          if (data && Array.isArray(data.tree)) {
+            const files = data.tree
+              .filter((item: any) => item.type === "blob")
+              .map((item: any) => item.path);
+            setGitHubFiles(files);
+            setIsLoadingFiles(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Direct GitHub recursive git trees request failed, falling back to proxy:", err);
+      }
+    }
+
+    // Fallback/Server proxy execution
     try {
       const res = await fetch(`/api/github/files?repo=${encodeURIComponent(repo)}&username=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.files)) {
           setGitHubFiles(data.files);
-          // Highlight primary components as active candidate if available
-          const primaryFile = data.files.find(f => f.includes("App.tsx") || f.includes("index.html")) || data.files[0] || "";
-          setSelectedFile(primaryFile);
-          if (primaryFile) {
-            loadRepoFileContent(primaryFile, repo, username, token);
-          }
         }
       }
     } catch (e) {
-      console.error("Error fetching files list from workspace:", e);
+      console.error("Error fetching files list from workspace proxy:", e);
     } finally {
       setIsLoadingFiles(false);
     }
@@ -763,17 +802,80 @@ export default function App() {
     } catch (e) {}
   }, []);
 
-  // Listen for callback broadcasts from popup
+  // Listen for callback broadcasts from popup and sync state dynamically
   useEffect(() => {
     const handlePopupBroadcast = (event: MessageEvent) => {
-      if (event.data?.type === "GITHUB_AUTH_SUCCESS") {
-        const { username, token } = event.data;
-        setGitHubUsername(username);
-        setGitHubToken(token);
-        setGitHubConnectedState("connected");
-        localStorage.setItem("github_username", username);
+      const data = event.data;
+      if (!data) return;
+
+      if (data.type === "GITHUB_AUTH_SUCCESS" && data.token) {
+        const token = data.token;
+        localStorage.setItem("github_oauth_token", token);
         localStorage.setItem("github_token", token);
-        loadGitHubRepos(username, token);
+
+        fetch("https://api.github.com/user", {
+          headers: {
+            "Authorization": `token ${token}`,
+            "Accept": "application/vnd.github.v3+json"
+          }
+        })
+        .then(res => res.json())
+        .then(userData => {
+          const username = userData.login || "viking";
+          setGitHubUsername(username);
+          setGitHubToken(token);
+          setGitHubConnectedState("connected");
+          localStorage.setItem("github_username", username);
+          loadGitHubRepos(username, token);
+        })
+        .catch(() => {
+          const username = "viking";
+          setGitHubUsername(username);
+          setGitHubToken(token);
+          setGitHubConnectedState("connected");
+          localStorage.setItem("github_username", username);
+          loadGitHubRepos(username, token);
+        });
+      } else if (data.token && !data.type) {
+        const token = data.token;
+        localStorage.setItem("github_oauth_token", token);
+        localStorage.setItem("github_token", token);
+
+        fetch("https://api.github.com/user", {
+          headers: {
+            "Authorization": `token ${token}`,
+            "Accept": "application/vnd.github.v3+json"
+          }
+        })
+        .then(res => res.json())
+        .then(userData => {
+          const username = userData.login || "viking";
+          setGitHubUsername(username);
+          setGitHubToken(token);
+          setGitHubConnectedState("connected");
+          localStorage.setItem("github_username", username);
+          loadGitHubRepos(username, token);
+        })
+        .catch(() => {
+          const username = "viking";
+          setGitHubUsername(username);
+          setGitHubToken(token);
+          setGitHubConnectedState("connected");
+          localStorage.setItem("github_username", username);
+          loadGitHubRepos(username, token);
+        });
+      } else if (data.type === "GITHUB_LOGOUT") {
+        setGitHubConnectedState("disconnected");
+        setGitHubRepos([]);
+        setSelectedRepo("");
+        setGitHubFiles([]);
+        setSelectedFile("");
+        setSelectedFileContent("");
+        setGitHubUsername("");
+        setGitHubToken("");
+        localStorage.removeItem("github_username");
+        localStorage.removeItem("github_token");
+        localStorage.removeItem("github_oauth_token");
       }
     };
     window.addEventListener("message", handlePopupBroadcast);
@@ -859,47 +961,175 @@ export default function App() {
     commitMsg: ""
   });
 
+const PARSER_WORKER_CODE = [
+  "self.onmessage = function(e) {",
+  "  const text = e.data.text || '';",
+  "  const updates = [];",
+  "  ",
+  "  const blockWithFilenameRegex = /`{3}([a-zA-Z0-9_\\-\\.]+)?[:\\s]([a-zA-Z0-9_\\-\\.\\/]+)\\n([\\s\\S]*?)`{3}/g;",
+  "  let match;",
+  "  const matchedFiles = new Set();",
+  "  ",
+  "  while ((match = blockWithFilenameRegex.exec(text)) !== null) {",
+  "    const filename = match[2].trim();",
+  "    const content = match[3];",
+  "    if (filename.indexOf('.') !== -1 || filename.indexOf('/') !== -1) {",
+  "      updates.push({ filename, content });",
+  "      matchedFiles.add(filename);",
+  "    }",
+  "  }",
+  "  ",
+  "  const headerAndBlockRegex = /(?:[fF]ile|[pP]ath|\\*\\*[fF]ile\\*\\*|\\*\\*[pP]ath\\*\\*):\\s*`?([a-zA-Z0-9_\\-\\.\\/]+)`?[\\s\\S]*?`{3}(?:\\w+)?\\n([\\s\\S]*?)`{3}/g;",
+  "  while ((match = headerAndBlockRegex.exec(text)) !== null) {",
+  "    const filename = match[1].trim();",
+  "    const content = match[2];",
+  "    if (!matchedFiles.has(filename)) {",
+  "      updates.push({ filename, content });",
+  "      matchedFiles.add(filename);",
+  "    }",
+  "  }",
+  "  ",
+  "  self.postMessage({ updates });",
+  "};"
+].join("\n");
+
+  const parseModifiedFilesSync = (text: string) => {
+    const updates: { filename: string; content: string }[] = [];
+    
+    // Pattern 1: Regex targeting standard file-labeled code blocks or language block labels:
+    // e.g., ```tsx src/App.tsx   or   ```html:index.html
+    const blockWithFilenameRegex = /```([a-zA-Z0-9_\-\.]+)?[:\s]([a-zA-Z0-9_\-\.\/]+)\n([\s\S]*?)```/g;
+    let match;
+    const matchedFiles = new Set<string>();
+    
+    while ((match = blockWithFilenameRegex.exec(text)) !== null) {
+      const filename = match[2].trim();
+      const content = match[3];
+      if (filename.includes(".") || filename.includes("/")) {
+        updates.push({ filename, content });
+        matchedFiles.add(filename);
+      }
+    }
+    
+    // Pattern 2: Scan for header indicators preceding standard code blocks, e.g.:
+    // File: src/components/APIModal.tsx
+    // ```tsx
+    // ...
+    // ```
+    const headerAndBlockRegex = /(?:[fF]ile|[pP]ath|\*\*[fF]ile\*\*|\*\*[pP]ath\*\*):\s*`?([a-zA-Z0-9_\-\.\/]+)`?[\s\S]*?```(?:\w+)?\n([\s\S]*?)```/g;
+    while ((match = headerAndBlockRegex.exec(text)) !== null) {
+      const filename = match[1].trim();
+      const content = match[2];
+      if (!matchedFiles.has(filename)) {
+        updates.push({ filename, content });
+        matchedFiles.add(filename);
+      }
+    }
+
+    return updates;
+  };
+
+  const parseModifiedFilesAsync = (text: string): Promise<{ filename: string; content: string }[]> => {
+    return new Promise((resolve) => {
+      try {
+        const blob = new Blob([PARSER_WORKER_CODE], { type: "application/javascript" });
+        const worker = new Worker(URL.createObjectURL(blob));
+        const timeout = setTimeout(() => {
+          console.warn("Async parser worker timed out, using fallback");
+          worker.terminate();
+          resolve(parseModifiedFilesSync(text));
+        }, 5000);
+
+        worker.onmessage = (e) => {
+          clearTimeout(timeout);
+          resolve(e.data.updates || []);
+          worker.terminate();
+        };
+
+        worker.onerror = (err) => {
+          console.error("Worker core parsing error:", err);
+          clearTimeout(timeout);
+          resolve(parseModifiedFilesSync(text));
+          worker.terminate();
+        };
+
+        worker.postMessage({ text });
+      } catch (err) {
+        console.warn("Web worker creation failed, using sync fallback", err);
+        resolve(parseModifiedFilesSync(text));
+      }
+    });
+  };
+
   const handleGitHubPush = async () => {
     triggerHapticFeedback();
     
-    // Choose the filename to push
-    let detectedFile = selectedFile || sandboxFilename || "src/App.tsx";
-    let codeStr = sandboxCode || "";
+    let filesToCommit: { filename: string; content: string }[] = [];
     
-    // Fallback if no active sandboxCode, search the latest message
-    if (!codeStr && activeMessages && activeMessages.length > 0) {
+    // Attempt to extract multiple files from assistant's messages in general activeMessages state
+    if (activeMessages && activeMessages.length > 0) {
+      // Find the last assistant message
       for (let i = activeMessages.length - 1; i >= 0; i--) {
         const msg = activeMessages[i];
-        if (msg.role === "assistant" && msg.content.includes("```")) {
-          const match = /```(?:html|css|js|ts|tsx)?\n([\s\S]*?)```/gi.exec(msg.content);
-          if (match && match[1]) {
-            codeStr = match[1];
-            const matchLang = /```(\w+)?/i.exec(msg.content);
-            const lang = matchLang ? matchLang[1] : "";
-            if (lang === "html") detectedFile = "index.html";
-            else if (lang === "css") detectedFile = "src/index.css";
-            else if (lang === "js") detectedFile = "src/main.tsx";
-            else if (lang === "ts") detectedFile = "server.ts";
-            else if (lang === "tsx") detectedFile = "src/App.tsx";
+        if (msg.role === "assistant") {
+          const parsed = await parseModifiedFilesAsync(msg.content);
+          if (parsed.length > 0) {
+            filesToCommit = parsed;
             break;
           }
         }
       }
     }
     
-    if (!codeStr) {
-      alert("No code content generated inside the active chat history yet. Please prompt the AI to code first.");
+    // If we didn't extract any files, fall back to the active single sandboxCode context
+    if (filesToCommit.length === 0) {
+      let detectedFile = sandboxFilename || "src/App.tsx";
+      let codeStr = sandboxCode || "";
+      
+      if (!codeStr && activeMessages && activeMessages.length > 0) {
+        for (let i = activeMessages.length - 1; i >= 0; i--) {
+          const msg = activeMessages[i];
+          if (msg.role === "assistant" && msg.content.includes("```")) {
+            const match = /```(?:html|css|js|ts|tsx)?\n([\s\S]*?)```/gi.exec(msg.content);
+            if (match && match[1]) {
+              codeStr = match[1];
+              const matchLang = /```(\w+)?/i.exec(msg.content);
+              const lang = matchLang ? matchLang[1] : "";
+              if (lang === "html") detectedFile = "index.html";
+              else if (lang === "css") detectedFile = "src/index.css";
+              else if (lang === "js") detectedFile = "src/main.tsx";
+              else if (lang === "ts") detectedFile = "server.ts";
+              else if (lang === "tsx") detectedFile = "src/App.tsx";
+              break;
+            }
+          }
+        }
+      }
+      
+      if (codeStr) {
+        filesToCommit.push({ filename: detectedFile, content: codeStr });
+      }
+    }
+    
+    if (filesToCommit.length === 0) {
+      alert("No code content detected inside the active chat history yet. Please prompt the AI to generate some code first.");
       return;
     }
     
+    const displayLabel = filesToCommit.length === 1 
+      ? filesToCommit[0].filename 
+      : `${filesToCommit.length} modified files`;
+
     setGitPushNotification({
       show: true,
       status: "processing",
-      filename: detectedFile,
+      filename: displayLabel,
       branch: "main",
       sha: "",
       commitMsg: ""
     });
+
+    setSyncingFilesCount(filesToCommit.length);
 
     try {
       const response = await fetch("/api/github/push", {
@@ -909,9 +1139,8 @@ export default function App() {
           repo: selectedRepo || "portfolio-site",
           username: gitHubUsername || "viking",
           token: gitHubToken || "mock-token",
-          filename: detectedFile,
-          content: codeStr,
-          commitMsg: `PocketCodex commit: updated ${detectedFile} with Coadex-style Rewrite pass.`
+          files: filesToCommit,
+          commitMsg: `PocketCodex Autonomous Loop: updated ${filesToCommit.length} file(s) synchronously.`
         })
       });
 
@@ -924,20 +1153,18 @@ export default function App() {
       setGitPushNotification({
         show: true,
         status: "success",
-        filename: detectedFile,
-        branch: "main",
+        filename: displayLabel,
+        branch: resData.branch || "main",
         sha: resData.sha || "sha-" + Math.round(Math.random() * 10000000).toString(16),
-        commitMsg: `Pushed Successfully! ✓ Synced ${detectedFile} to active main branch`
+        commitMsg: `Pushed Successfully! ✓ Committed and updated ${filesToCommit.length} file(s) on ${resData.branch || "main"} branch.`
       });
 
       // Victory haptic trigger
       triggerHapticFeedback();
       setTimeout(triggerHapticFeedback, 150);
 
-      // Save locally if the pushed file is the matching workspace file
-      if (detectedFile === selectedFile) {
-        setSelectedFileContent(codeStr);
-      }
+      // Reload files mapping list so we are synced with the newest commit state
+      loadRepoFiles(selectedRepo || "portfolio-site", gitHubUsername || "viking", gitHubToken || "");
 
       // Auto dismiss success toast
       setTimeout(() => {
@@ -947,7 +1174,9 @@ export default function App() {
     } catch (pushErr) {
       console.error("Push Error: ", pushErr);
       setGitPushNotification((prev) => ({ ...prev, show: false, status: "idle" }));
-      alert("Secure checkout commit failed. Check your GitHub repository scope settings.");
+      alert("Autonomous multi-file checkout commit failed. Check your GitHub repository scope settings.");
+    } finally {
+      setSyncingFilesCount(0);
     }
   };
 
@@ -1200,9 +1429,9 @@ export default function App() {
     
     const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || apiKey.startsWith("AIzaSy");
     
-    let selectedModel = "gemini-1.5-flash";
+    let selectedModel = "gemini-3.5-flash";
     if (engine.provider?.toLowerCase().includes("pro")) {
-      selectedModel = "gemini-1.5-pro";
+      selectedModel = "gemini-3.1-pro-preview";
     }
 
     const currentMode = projectEnv === "chat" ? "JUST CHAT" : "BUILD ARTIFACTS";
@@ -1229,11 +1458,9 @@ export default function App() {
         // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
         const modelsToTry = [
           selectedModel,
-          "gemini-1.5-flash-latest",
-          "gemini-2.5-flash",
-          "gemini-1.5-flash",
-          "gemini-1.5-pro-latest",
-          "gemini-1.5-pro"
+          "gemini-3.5-flash",
+          "gemini-flash-latest",
+          "gemini-3.1-pro-preview"
         ];
 
         let success = false;
@@ -1262,8 +1489,8 @@ export default function App() {
 
             let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
             
-            if (gitHubConnectedState === "connected" && selectedRepo && selectedFile) {
-              systemInstruction += `\n\n[Active GitHub Workspace context]:\nRepository: ${selectedRepo}\nActive Target File: ${selectedFile}\n\nHere is the existing code inside ${selectedFile}:\n\n\`\`\`\n${selectedFileContent}\n\`\`\`\n\nAnalyze this code. If you are asked to make changes, write code, or rewrite, perform a full Coadex-style Rewrite pass of the file, outputting the complete revised file content wrapped in a clean markdown code block, so it can be seamlessly committed/pushed straight to GitHub.`;
+            if (gitHubConnectedState === "connected" && selectedRepo) {
+              systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(gitHubFiles, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
             }
 
             payload = {
@@ -1521,28 +1748,12 @@ export default function App() {
                   setShowInspectorPanel(false);
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg font-bold transition cursor-pointer ${
-                  mainTab === "preview" && !showInspectorPanel
+                  mainTab === "preview"
                     ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
                     : "text-neutral-450 hover:text-neutral-200"
                 }`}
               >
                 <span>Preview</span>
-              </button>
-            )}
-            {projectEnv === "android" && (
-              <button
-                onClick={() => {
-                  triggerHapticFeedback();
-                  setMainTab("preview");
-                  setShowInspectorPanel(true);
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg font-bold transition cursor-pointer ${
-                  mainTab === "preview" && showInspectorPanel
-                    ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
-                    : "text-neutral-450 hover:text-neutral-200"
-                }`}
-              >
-                <span>Inspect Build</span>
               </button>
             )}
           </div>
@@ -1585,7 +1796,7 @@ export default function App() {
                       ? "bg-amber-500 text-neutral-950 font-extrabold shadow-sm"
                       : "text-neutral-400 hover:text-neutral-200"
                   }`}
-                  title="Desktop Mode (760px)"
+                  title="Desktop Mode (Widescreen PC)"
                 >
                   <Laptop className="h-3.5 w-3.5" />
                   <span className="hidden xs:inline uppercase tracking-widest text-[9px] font-mono">Desktop</span>
@@ -2080,15 +2291,16 @@ export default function App() {
                           <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24">
                             <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
                           </svg>
-                          <span>🔗 Connect GitHub</span>
+                          <span>Connect GitHub</span>
                         </button>
                       )}
 
                       {gitHubConnectedState === 'connected' && (
                         <div className="px-2.5 py-1 space-y-2">
                           <div className="space-y-1">
-                            <label className="text-[10px] text-neutral-400 font-bold block select-none">📁 Select Target Repository:</label>
+                            <label className="text-[10px] text-neutral-400 font-bold block select-none">SELECT TARGET REPOSITORY</label>
                             <select
+                              id="repo-select"
                               value={selectedRepo}
                               onChange={(e) => {
                                 const r = e.target.value;
@@ -2106,43 +2318,26 @@ export default function App() {
                               ))}
                             </select>
                           </div>
-
+                          
                           {isLoadingFiles ? (
-                            <div className="py-1 text-center flex items-center justify-center gap-1.5 text-[10px] text-zinc-400">
-                              <span className="h-3 w-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></span>
-                              Scanning Workspace Filetree...
+                            <div className="py-2 text-center flex items-center justify-center gap-1.5 text-[10px] text-zinc-400 font-mono">
+                              <span className="h-3 w-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></span>
+                              Tracking Repo filetree...
                             </div>
-                          ) : (
-                            gitHubFiles.length > 0 && (
-                              <div className="space-y-1">
-                                <label className="text-[10px] text-neutral-400 font-bold block select-none">📄 Active Context Target File:</label>
-                                <select
-                                  value={selectedFile}
-                                  onChange={(e) => {
-                                    const f = e.target.value;
-                                    setSelectedFile(f);
-                                    triggerHapticFeedback();
-                                    loadRepoFileContent(f, selectedRepo, gitHubUsername, gitHubToken);
-                                  }}
-                                  className="w-full bg-[#16161a] text-xs text-white rounded-lg border border-neutral-800 p-1.5 focus:outline-none focus:border-neutral-600 cursor-pointer font-sans"
-                                >
-                                  <option value="" disabled>-- Select File to Edit --</option>
-                                  {gitHubFiles.map((file) => (
-                                    <option key={file} value={file}>
-                                      {file}
-                                    </option>
-                                  ))}
-                                </select>
+                          ) : syncingFilesCount > 0 ? (
+                            <div className="bg-amber-500/5 border border-amber-500/20 p-2.5 rounded-xl text-left space-y-1.5 animate-pulse">
+                              <div className="text-[9px] uppercase tracking-wider font-extrabold text-amber-500 flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping"></span>
+                                ⚡ Autonomous Sync Active
                               </div>
-                            )
-                          )}
-
-                          {selectedFile && !isLoadingFiles && (
-                            <div className="bg-emerald-500/5 border border-emerald-500/10 text-[#10b981] p-1.5 rounded-lg text-[9px] font-mono leading-tight space-y-0.5 select-all">
-                              <div className="font-bold text-neutral-400">Context File Enabled:</div>
-                              <div className="truncate">{selectedFile}</div>
+                              <div className="text-[10px] text-zinc-300 font-bold font-mono leading-normal">
+                                Syncing {syncingFilesCount} files in background...
+                              </div>
+                              <div className="w-full bg-neutral-900 rounded-full h-1 overflow-hidden relative">
+                                <div className="bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 h-1 rounded-full w-full absolute top-0 left-0 animate-pulse"></div>
+                              </div>
                             </div>
-                          )}
+                          ) : null}
 
                           <div className="flex justify-between items-center pt-1 border-t border-neutral-800/50">
                             <span className="text-[9px] text-[#10b981] font-extrabold flex items-center gap-1 leading-none">
@@ -2246,32 +2441,56 @@ export default function App() {
                     title="PocketCodex Main Running Preview"
                     srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
                     className="w-full h-full border-0 bg-[#0c0c0e]"
+                    style={{
+                      willChange: "transform",
+                      transformStyle: "preserve-3d",
+                      WebkitBackfaceVisibility: "hidden",
+                      backfaceVisibility: "hidden",
+                    }}
                   />
                 </div>
               ) : previewDevice === "macbook" ? (
-                /* Desktop (💻 Layout): Sleek Desktop PC Widescreen layout with smart scaling and bezel casing */
+                /* Desktop (💻 Layout): Sleek Desktop PC Widescreen layout with elegant container framing */
                 <div 
-                  className="border-4 border-zinc-700 bg-[#111215] rounded-xl shadow-2xl mx-auto overflow-hidden relative"
+                  className="border-[6px] border-zinc-800 bg-[#111215] rounded-2xl shadow-2xl mx-auto overflow-hidden relative flex flex-col w-full animate-fadeIn"
                   style={{ 
-                    width: "760px", 
-                    height: "420px",
-                    transform: "scale(0.45)",
-                    transformOrigin: "center center",
+                    maxWidth: "960px", 
+                    height: "540px",
                     transition: "all 0.3s ease-in-out"
                   }}
                 >
-                  {/* Active Compilation Overlay Loader */}
-                  {compilationStatus === "compiling" && (
-                    <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
-                      <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
-                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                  {/* Browser Sleek Header Bar */}
+                  <div className="h-8 bg-zinc-900 border-b border-zinc-800/80 flex items-center px-4 gap-2 select-none shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500/80"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-500/80"></span>
                     </div>
-                  )}
-                  <iframe
-                    title="PocketCodex Main Running Preview"
-                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
-                    className="w-full h-full border-0 bg-[#0c0c0e]"
-                  />
+                    <div className="flex-1 max-w-sm mx-auto bg-zinc-950 px-3 py-1 rounded text-[10px] text-zinc-500 font-mono text-center truncate">
+                      https://codex.sandbox.local/preview-desktop
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 relative min-h-0 w-full">
+                    {/* Active Compilation Overlay Loader */}
+                    {compilationStatus === "compiling" && (
+                      <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
+                        <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
+                        <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                      </div>
+                    )}
+                    <iframe
+                      title="PocketCodex Main Running Preview"
+                      srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                      className="w-full h-full border-0 bg-[#0c0c0e]"
+                      style={{
+                        willChange: "transform",
+                        transformStyle: "preserve-3d",
+                        WebkitBackfaceVisibility: "hidden",
+                        backfaceVisibility: "hidden",
+                      }}
+                    />
+                  </div>
                 </div>
               ) : (
                 /* Fullscreen (🔀 Layout): Direct maximum aspect view, stripping away dynamic borders or frame elements */
@@ -2293,63 +2512,18 @@ export default function App() {
                     title="PocketCodex Main Running Preview"
                     srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
                     className="w-full h-full border-0 bg-[#0c0c0e]"
+                    style={{
+                      willChange: "transform",
+                      transformStyle: "preserve-3d",
+                      WebkitBackfaceVisibility: "hidden",
+                      backfaceVisibility: "hidden",
+                    }}
                   />
                 </div>
               )}
             </div>
 
-            {/* Slide-out Terminal Logs Inspector Panel */}
-            <AnimatePresence>
-              {showInspectorPanel && (
-                <motion.div
-                  initial={{ opacity: 0, x: 50, width: 0 }}
-                  animate={{ opacity: 1, x: 0, width: 340 }}
-                  exit={{ opacity: 0, x: 50, width: 0 }}
-                  transition={{ type: "spring", duration: 0.35 }}
-                  className="h-full border-l border-neutral-900 bg-[#0a0a0c] flex flex-col select-none shrink-0 text-left"
-                >
-                  {/* Inspector Panel Header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-900 bg-[#0e0e11]">
-                    <div className="flex items-center gap-1.5">
-                      <Terminal className="h-4 w-4 text-amber-500" />
-                      <span className="text-[11px] font-black uppercase tracking-wider text-neutral-300">Live Build Terminal</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowInspectorPanel(false)}
-                      className="text-neutral-500 hover:text-neutral-300 p-1"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
 
-                  {/* Logs Feed - Terminal Style */}
-                  <div className="flex-1 p-4 overflow-y-auto font-mono text-xs leading-relaxed bg-neutral-950 space-y-2 text-left flex flex-col justify-start">
-                    {inspectorLogOutput.map((logLine, idx) => {
-                      const isError = logLine.includes("⚠️ Error") || logLine.includes("error");
-                      const isSuccess = logLine.includes("✓ Build Successful") || logLine.includes("SUCCESSFUL");
-                      return (
-                        <div 
-                          key={idx} 
-                          className={`break-words ${
-                            isError ? "text-red-500 font-bold" 
-                            : (isSuccess ? "text-emerald-500 font-bold" : "text-amber-500 animate-pulse")
-                          }`}
-                        >
-                          {logLine}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Compiler State Metrics Bar */}
-                  <div className="p-3 border-t border-neutral-900 bg-[#0e0e11] font-mono text-[9px] text-neutral-500 flex justify-between items-center bg-neutral-950/20">
-                    <span>Virtual Env: sandbox-v3</span>
-                    <span>Babel v7.x (TSPreset)</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         </div>
       </div>

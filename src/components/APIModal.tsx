@@ -99,6 +99,10 @@ export default function APIModal({
   // Simulated Google Cloud OAuth workflow state
   const [isAutoSelectingEmail, setIsAutoSelectingEmail] = useState<string | null>(null);
 
+  // GitHub Integration States inside Modal console
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubUser, setGithubUser] = useState("");
+
   // Initialize and Sync from standard LocalStorage elements
   useEffect(() => {
     if (isOpen) {
@@ -165,6 +169,17 @@ export default function APIModal({
       } else {
         initializeDefaultGmailProfiles();
       }
+
+      // 3. Fetch current connected GitHub workspace profile
+      const savedUser = localStorage.getItem("github_username");
+      const savedToken = localStorage.getItem("github_token");
+      if (savedUser && savedToken) {
+        setGithubConnected(true);
+        setGithubUser(savedUser);
+      } else {
+        setGithubConnected(false);
+        setGithubUser("");
+      }
     }
   }, [isOpen]);
 
@@ -175,6 +190,63 @@ export default function APIModal({
     ];
     setGmailAccounts(defaultProfiles);
     localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(defaultProfiles));
+  };
+
+  // Listen for callback broadcasts from popup and external disconnects
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === "GITHUB_AUTH_SUCCESS" && event.data?.token) {
+        const token = event.data.token;
+        fetch("https://api.github.com/user", {
+          headers: {
+            "Authorization": `token ${token}`,
+            "Accept": "application/vnd.github.v3+json"
+          }
+        })
+        .then(res => res.json())
+        .then(userData => {
+          const username = userData.login || "viking";
+          setGithubConnected(true);
+          setGithubUser(username);
+        })
+        .catch(() => {
+          setGithubConnected(true);
+          setGithubUser("viking");
+        });
+      } else if (event.data?.type === "GITHUB_LOGOUT") {
+        setGithubConnected(false);
+        setGithubUser("");
+      }
+    };
+    window.addEventListener("message", handleAuthMessage);
+    return () => window.removeEventListener("message", handleAuthMessage);
+  }, []);
+
+  const handleConnectGithubModal = () => {
+    triggerHaptic();
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    const popup = window.open(
+      "/api/auth",
+      "github_oauth_popup",
+      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
+    );
+    if (!popup) {
+      alert("Pop-up blocker is active. Please enable popups to authenticate GitHub!");
+    }
+  };
+
+  const handleDisconnectGithubModal = () => {
+    triggerHaptic();
+    localStorage.removeItem("github_username");
+    localStorage.removeItem("github_token");
+    localStorage.removeItem("github_oauth_token");
+    setGithubConnected(false);
+    setGithubUser("");
+    // Publish dynamic event so main container picks it up immediately
+    window.postMessage({ type: "GITHUB_LOGOUT" }, "*");
   };
 
   const triggerHaptic = () => {
@@ -976,6 +1048,66 @@ export default function APIModal({
                           </div>
                         ))
                       )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. GITHUB REPOSITORY SYNC SECTION */}
+                <div className="space-y-3 pt-4 border-t border-neutral-900">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-neutral-400 flex items-center gap-1.5 font-sans">
+                      <svg className="h-3.5 w-3.5 fill-current text-neutral-400 shrink-0" viewBox="0 0 24 24">
+                        <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                      </svg>
+                      Github Repository Sync
+                    </h4>
+                    {githubConnected && (
+                      <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Connected as {githubUser}
+                      </span>
+                    )}
+                  </div>
+
+                  {!githubConnected ? (
+                    <div className="bg-[#0b0b0d] p-3.5 rounded-xl border border-neutral-900/60 text-center space-y-3">
+                      <p className="text-[10px] text-neutral-400 leading-normal">
+                        Sync your code sandbox directly with GitHub. Save artifacts, push live commits, and fetch repos seamlessly with 1-Click native integration.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleConnectGithubModal}
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-black font-extrabold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        <svg className="h-4 w-4 fill-current text-neutral-950 shrink-0" viewBox="0 0 24 24">
+                          <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                        </svg>
+                        Continue with GitHub
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-[#0b0b0d] p-3.5 rounded-xl border border-neutral-900/60 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-2 rounded-lg bg-neutral-900 text-neutral-400">
+                          <svg className="h-4 w-4 fill-current text-white shrink-0" viewBox="0 0 24 24">
+                            <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-neutral-200 block truncate">@{githubUser}</span>
+                          <span className="text-[9px] text-[#10b981] font-mono flex items-center gap-1">
+                            <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+                            Live Workspace Linked
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGithubModal}
+                        className="px-3 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-neutral-400 hover:text-red-400 hover:border-red-500/25 transition text-[10px] font-bold cursor-pointer"
+                      >
+                        Disconnect
+                      </button>
                     </div>
                   )}
                 </div>
