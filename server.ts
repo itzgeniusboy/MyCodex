@@ -222,10 +222,23 @@ async function startServer() {
     `);
   });
 
+  // Helper functions to clean and validate credentials
+  const cleanToken = (token: any): string => {
+    if (!token) return "";
+    return String(token).trim().replace(/["'\s\r\n]/g, "");
+  };
+
+  const cleanUsername = (username: any): string => {
+    if (!username) return "";
+    return String(username).trim();
+  };
+
   // Scan and fetch repository lists
   app.get("/api/github/repos", async (req, res) => {
     try {
-      const { username, token } = req.query;
+      const { username: rawUsername, token: rawToken } = req.query;
+      const username = cleanUsername(rawUsername);
+      const token = cleanToken(rawToken);
       if (token && token !== "mock-token" && username) {
         try {
           const response = await fetch(`https://api.github.com/users/${username}/repos?per_page=15&sort=updated`, {
@@ -255,7 +268,9 @@ async function startServer() {
   // Recursive file tree reader for repositories or local sandbox workspace
   app.get("/api/github/files", async (req, res) => {
     try {
-      const { repo, username, token } = req.query;
+      const { repo, username: rawUsername, token: rawToken } = req.query;
+      const username = cleanUsername(rawUsername);
+      const token = cleanToken(rawToken);
       
       // If we have a real username and token, attempt to fetch from GitHub API
       if (token && token !== "mock-token" && username && repo) {
@@ -292,7 +307,9 @@ async function startServer() {
   // Get file content
   app.get("/api/github/file-content", async (req, res) => {
     try {
-      const { repo, username, token, filename } = req.query;
+      const { repo, username: rawUsername, token: rawToken, filename } = req.query;
+      const username = cleanUsername(rawUsername);
+      const token = cleanToken(rawToken);
       if (!filename) {
         return res.status(400).json({ error: "Filename is required" });
       }
@@ -336,7 +353,9 @@ async function startServer() {
   // Commit and write code changes locally or push to Real/Mock GitHub Repository (supports multi-file sync)
   app.post("/api/github/push", async (req, res) => {
     try {
-      const { repo, username, token, filename, content, files: bodyFiles, commitMsg } = req.body;
+      const { repo, username: rawUsername, token: rawToken, filename, content, files: bodyFiles, commitMsg } = req.body;
+      const username = cleanUsername(rawUsername);
+      const token = cleanToken(rawToken);
       
       // Parse array of files to process
       const filesToCommit: { filename: string; content: string }[] = [];
@@ -772,6 +791,9 @@ async function startServer() {
         console.log("Routing request to Groq client completions standard proxy...");
         const groqUrl = "https://api.groq.com/openai/v1/chat/completions";
         
+        // Slice context payload to keep completions speedy
+        const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
         const response = await fetch(groqUrl, {
           method: "POST",
           headers: {
@@ -780,7 +802,7 @@ async function startServer() {
           },
           body: JSON.stringify({
             model: "llama3-8b-8192",
-            messages: messages.map((m: any) => ({
+            messages: limitedMessages.map((m: any) => ({
               role: m.role === "assistant" ? "assistant" : "user",
               content: m.content
             })),
@@ -808,6 +830,9 @@ async function startServer() {
         console.log("Routing request to OpenAI completions standard proxy...");
         const openaiUrl = "https://api.openai.com/v1/chat/completions";
         
+        // Slice context payload to keep completions speedy
+        const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
         const response = await fetch(openaiUrl, {
           method: "POST",
           headers: {
@@ -816,7 +841,7 @@ async function startServer() {
           },
           body: JSON.stringify({
             model: "gpt-4o-mini",
-            messages: messages.map((m: any) => ({
+            messages: limitedMessages.map((m: any) => ({
               role: m.role === "assistant" ? "assistant" : "user",
               content: m.content
             })),
@@ -845,7 +870,9 @@ async function startServer() {
 
         // Helper function to clean and validate contents for Gemini API (prevents status 400 validation failures)
         const sanitizeGeminiContents = (rawMessages: any[]) => {
-          const mapped = rawMessages
+          // Slice the context payload helper to the last 10 messages for massive latency drops
+          const limitedMessages = rawMessages.length > 10 ? rawMessages.slice(-10) : rawMessages;
+          const mapped = limitedMessages
             .filter(m => m && m.content && m.content.trim() !== "")
             .map(m => {
               const role = (m.role === "assistant" || m.role === "model") ? "model" : "user";

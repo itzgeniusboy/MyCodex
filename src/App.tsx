@@ -1181,6 +1181,10 @@ const PARSER_WORKER_CODE = [
       ? filesToCommit[0].filename 
       : `${filesToCommit.length} modified files`;
 
+    const cleanedRepo = (selectedRepo || "portfolio-site").trim();
+    const cleanedUsername = (gitHubUsername || "developer").trim();
+    const cleanedToken = (gitHubToken || "").trim().replace(/["'\s\n\r]/g, "");
+
     setGitPushNotification({
       show: true,
       status: "processing",
@@ -1197,16 +1201,23 @@ const PARSER_WORKER_CODE = [
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          repo: selectedRepo || "portfolio-site",
-          username: gitHubUsername || "developer",
-          token: gitHubToken || "mock-token",
+          repo: cleanedRepo,
+          username: cleanedUsername,
+          token: cleanedToken,
           files: filesToCommit,
           commitMsg: `PocketCodex Autonomous Loop: updated ${filesToCommit.length} file(s) synchronously.`
         })
       });
 
       if (!response.ok) {
-        throw new Error("Push stalled");
+        let errMsg = "Push stalled";
+        try {
+          const errPayload = await response.json();
+          if (errPayload && errPayload.error) {
+            errMsg = errPayload.error;
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
       const resData = await response.json();
@@ -1225,17 +1236,17 @@ const PARSER_WORKER_CODE = [
       setTimeout(triggerHapticFeedback, 150);
 
       // Reload files mapping list so we are synced with the newest commit state
-      loadRepoFiles(selectedRepo || "portfolio-site", gitHubUsername || "developer", gitHubToken || "");
+      loadRepoFiles(cleanedRepo, cleanedUsername, cleanedToken);
 
       // Auto dismiss success toast
       setTimeout(() => {
         setGitPushNotification((prev) => (prev.status === "success" ? { ...prev, show: false } : prev));
       }, 5000);
 
-    } catch (pushErr) {
+    } catch (pushErr: any) {
       console.error("Push Error: ", pushErr);
       setGitPushNotification((prev) => ({ ...prev, show: false, status: "idle" }));
-      alert("Autonomous multi-file checkout commit failed. Check your GitHub repository scope settings.");
+      alert(`Autonomous multi-file checkout commit failed: ${pushErr.message || pushErr}. Check your GitHub repository scope settings.`);
     } finally {
       setSyncingFilesCount(0);
     }
@@ -1316,7 +1327,7 @@ const PARSER_WORKER_CODE = [
           name: firebaseUser.displayName || capitalizedName,
           avatarUrl: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(capitalizedName)}`,
           isLoggedIn: true,
-          designatedApiKey: `session-verified-token-${btoa(firebaseUser.email || "")}`
+          designatedApiKey: `session-verified-token-${btoa(unescape(encodeURIComponent(firebaseUser.email || "")))}`
         };
         
         setUser(profile);
@@ -1717,7 +1728,9 @@ const PARSER_WORKER_CODE = [
             } else {
               // Normal system context generation payloads
               const sanitizeGeminiContents = (rawMessages: any[]) => {
-                const mapped = rawMessages
+                // Slicing history to the last 10 messages for dramatic response speed up
+                const limitedMessages = rawMessages.length > 10 ? rawMessages.slice(-10) : rawMessages;
+                const mapped = limitedMessages
                   .filter(m => m && m.content && m.content.trim() !== "")
                   .map(m => {
                     const role = (m.role === "assistant" || m.role === "model") ? "model" : "user";
@@ -1760,7 +1773,11 @@ const PARSER_WORKER_CODE = [
               let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
               
               if (gitHubConnectedState === "connected" && selectedRepo) {
-                systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(gitHubFiles, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
+                // Truncate the file list if it exceeds 30 files to supercharge response speed
+                const fileTreeSubset = gitHubFiles.length > 30 
+                  ? [...gitHubFiles.slice(0, 30), `... and ${gitHubFiles.length - 30} other files`]
+                  : gitHubFiles;
+                systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(fileTreeSubset, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
               }
 
               payload = {
@@ -1903,20 +1920,55 @@ const PARSER_WORKER_CODE = [
       throw lastErr || new Error("All attempted failover account credentials returned quota exhaustion or failures.");
     }
 
-      const assistantMsg: Message = {
-        id: `msg-${Date.now() + 1}`,
+      const targetThreadId = currentThread ? currentThread.id : activeThreadId;
+      const assistantMsgId = `msg-${Date.now() + 1}`;
+
+      const emptyAssistantMsg: Message = {
+        id: assistantMsgId,
         role: "assistant",
-        content: reply,
+        content: "",
         timestamp: new Date()
       };
 
+      // Instantly inject empty placeholder message to initiate response display
       setThreads((prev) =>
         prev.map((t) =>
-          t.id === (currentThread ? currentThread.id : activeThreadId)
-            ? { ...t, messages: [...updatedMsgs, assistantMsg], updatedAt: new Date() }
+          t.id === targetThreadId
+            ? { ...t, messages: [...updatedMsgs, emptyAssistantMsg], updatedAt: new Date() }
             : t
         )
       );
+
+      // Rapid and responsive streaming animation loop
+      const words = reply.split(" ");
+      let wordIdx = 0;
+      let streamedContent = "";
+
+      const streamTimer = setInterval(() => {
+        const wordsPerTick = Math.max(3, Math.ceil(words.length / 40));
+        const wordsSubset = words.slice(wordIdx, wordIdx + wordsPerTick);
+        streamedContent += (wordIdx === 0 ? "" : " ") + wordsSubset.join(" ");
+        wordIdx += wordsPerTick;
+
+        setThreads((prev) =>
+          prev.map((t) => {
+            if (t.id === targetThreadId) {
+              return {
+                ...t,
+                messages: t.messages.map((m) =>
+                  m.id === assistantMsgId ? { ...m, content: streamedContent } : m
+                ),
+                updatedAt: new Date()
+              };
+            }
+            return t;
+          })
+        );
+
+        if (wordIdx >= words.length) {
+          clearInterval(streamTimer);
+        }
+      }, 30);
     } catch (err: any) {
       console.error(err);
       
@@ -2945,7 +2997,7 @@ const PARSER_WORKER_CODE = [
             localStorage.setItem("gemini_api_key", profile.designatedApiKey);
             localStorage.setItem("chat_gpt_ios_custom_key", profile.designatedApiKey);
           } else {
-            const token = "session-verified-token-" + btoa(profile.email);
+            const token = "session-verified-token-" + btoa(unescape(encodeURIComponent(profile.email || "")));
             localStorage.setItem("gemini_api_key", token);
             localStorage.setItem("chat_gpt_ios_custom_key", token);
           }

@@ -57,7 +57,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
           name: result.user.displayName || capitalizedName,
           avatarUrl: result.user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(capitalizedName)}`,
           isLoggedIn: true,
-          designatedApiKey: `session-verified-token-${btoa(result.user.email || "")}`
+          designatedApiKey: `session-verified-token-${btoa(unescape(encodeURIComponent(result.user.email || "")))}`
         };
         setTimeout(() => {
           onLoginSubmit(userProfile);
