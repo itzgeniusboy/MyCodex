@@ -1,10 +1,10 @@
 {
-  "projectId": "triple-outlook-k07pf",
-  "appId": "1:1089444123039:web:194bcffad9624e18e1edaa",
-  "apiKey": "AIzaSyDZAzOKScEsffj6-e8Ler8rxTVutyIzNA4",
-  "authDomain": "triple-outlook-k07pf.firebaseapp.com",
+  "projectId": "pocketcodex-production",
+  "appId": "1:180779451123:web:06939eadbc1350bc5aad86",
+  "apiKey": "AIzaSyA8iEVJpzhershzQPlP8ouAXB-ioiLFTE8",
+  "authDomain": "pocketcodex-production.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-9dd5c427-1b71-434e-a400-105feb44eb80",
-  "storageBucket": "triple-outlook-k07pf.firebasestorage.app",
-  "messagingSenderId": "1089444123039",
+  "storageBucket": "pocketcodex-production.firebasestorage.app",
+  "messagingSenderId": "180779451123",
   "measurementId": ""
 }
