@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Mail, ArrowRight, ArrowLeft, Loader2, Lock } from "lucide-react";
+import { X, Mail, ArrowRight, ArrowLeft, Loader2, Lock, Copy, CheckCircle2, ExternalLink, AlertTriangle } from "lucide-react";
 import { UserProfile } from "../types";
 import { googleSignIn } from "../lib/firebase";
 
@@ -9,6 +9,23 @@ interface LoginModalProps {
   onClose: () => void;
   onLoginSubmit: (value: UserProfile) => void;
 }
+
+const getDevAndPreDomains = () => {
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : "";
+  if (!currentHost) return [];
+  if (currentHost.includes("localhost") || currentHost.includes("127.0.0.1")) {
+    return [currentHost];
+  }
+  if (currentHost.includes(".run.app")) {
+    const devHost = currentHost.replace("-pre-", "-dev-");
+    const preHost = currentHost.replace("-dev-", "-pre-");
+    if (devHost === preHost) {
+      return [currentHost];
+    }
+    return [devHost, preHost];
+  }
+  return [currentHost];
+};
 
 export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModalProps) {
   const [email, setEmail] = useState("");
@@ -23,6 +40,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState<string | null>(null);
 
   const otpRefs = [
     useRef<HTMLInputElement>(null),
@@ -302,10 +320,59 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    className="mb-4 rounded-xl border border-red-500/20 bg-red-950/20 p-3 text-xs text-red-400 text-center font-medium"
+                    className="mb-4 rounded-xl border border-red-500/20 bg-[#120707] p-3 text-xs text-red-400 font-medium overflow-hidden"
                     id="otp-error-alert"
                   >
-                    {errorMessage}
+                    {errorMessage.includes("unauthorized-domain") ? (
+                      <div className="text-left space-y-3">
+                        <div className="flex items-center gap-2 text-red-400 font-bold">
+                          <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
+                          <span>Firebase Auth Domain Error</span>
+                        </div>
+                        <p className="text-[11px] text-neutral-300 leading-relaxed font-normal">
+                          Your sandbox environment's active Cloud Run domains must be allowed in your Firebase project configuration.
+                        </p>
+                        
+                        <div className="space-y-1.5 p-2 bg-[#0c0505] rounded-lg border border-red-950/40">
+                          <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-widest block font-sans">Domains to Authorize:</span>
+                          {getDevAndPreDomains().map((domain, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2 bg-[#140b0b] px-2 py-1 rounded text-[10px] font-mono select-all text-neutral-200 border border-red-950/20">
+                              <span className="truncate">{domain}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(domain);
+                                  setCopiedDomain(domain);
+                                  setTimeout(() => setCopiedDomain(null), 2000);
+                                }}
+                                className="text-neutral-400 hover:text-white transition shrink-0"
+                                title="Copy Domain"
+                              >
+                                {copiedDomain === domain ? (
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="h-3 w-3" />
+                                )}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="space-y-1 text-[11px] text-neutral-400 leading-relaxed border-t border-neutral-800/40 pt-2 font-normal">
+                          <p className="font-semibold text-neutral-300">Quick Setup Instructions:</p>
+                          <ol className="list-decimal list-inside space-y-1 pl-1 text-[10px]">
+                            <li>
+                              Open your <a href="https://console.firebase.google.com/project/pocketcodex-production/authentication/settings" target="_blank" rel="noopener noreferrer" className="text-red-400 hover:underline inline-flex items-center gap-0.5 font-bold">Firebase Console <ExternalLink className="h-2.5 w-2.5 inline" /></a>
+                            </li>
+                            <li>Navigate to <strong className="text-neutral-300">Settings</strong> tab at the top.</li>
+                            <li>Click <strong className="text-neutral-300">Authorized domains</strong> in the side sub-panel.</li>
+                            <li>Click <strong className="text-neutral-300">Add domain</strong> and paste the copied domain(s).</li>
+                          </ol>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center">{errorMessage}</div>
+                    )}
                   </motion.div>
                 )}
 
