@@ -26,6 +26,7 @@ interface GmailAccount {
   email: string;
   accessToken: string;
   isActive: boolean;
+  isExhausted?: boolean;
 }
 
 interface SavedAPI {
@@ -54,13 +55,7 @@ const PROVIDER_LIST = [
   { value: "custom", label: "Custom OpenAPI Endpoint" }
 ];
 
-const LOCAL_DEVICE_PROFILES = [
-  "itzraviking@gmail.com",
-  "ravi.kumar.dev@gmail.com",
-  "guest.pilot.engineer@gmail.com",
-  "pocketcodex.sandbox@gmail.com",
-  "coder.v1.terminal@gmail.com"
-];
+const LOCAL_DEVICE_PROFILES: string[] = [];
 
 export default function APIModal({
   isOpen,
@@ -154,7 +149,7 @@ export default function APIModal({
       }
 
       // 2. Fetch current connected Gmail profiles
-      const storedGmail = localStorage.getItem("chat_gpt_ios_gmail_accounts");
+      const storedGmail = localStorage.getItem("pocketcodex_gmail_vault") || localStorage.getItem("chat_gpt_ios_gmail_accounts");
       if (storedGmail) {
         try {
           const parsed = JSON.parse(storedGmail);
@@ -184,11 +179,9 @@ export default function APIModal({
   }, [isOpen]);
 
   const initializeDefaultGmailProfiles = () => {
-    const defaultProfiles = [
-      { id: "mock-1", email: "ravi.kumar.dev@gmail.com", accessToken: "mock-token-1", isActive: true },
-      { id: "mock-2", email: "guest.pilot.engineer@gmail.com", accessToken: "mock-token-2", isActive: false }
-    ];
+    const defaultProfiles: GmailAccount[] = [];
     setGmailAccounts(defaultProfiles);
+    localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(defaultProfiles));
     localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(defaultProfiles));
   };
 
@@ -205,13 +198,13 @@ export default function APIModal({
         })
         .then(res => res.json())
         .then(userData => {
-          const username = userData.login || "viking";
+          const username = userData.login || "developer";
           setGithubConnected(true);
           setGithubUser(username);
         })
         .catch(() => {
           setGithubConnected(true);
-          setGithubUser("viking");
+          setGithubUser("developer");
         });
       } else if (event.data?.type === "GITHUB_LOGOUT") {
         setGithubConnected(false);
@@ -392,6 +385,7 @@ export default function APIModal({
       isActive: g.id === id
     }));
     setGmailAccounts(updated);
+    localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(updated));
     localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(updated));
 
     if (onActiveUserChange) {
@@ -415,10 +409,12 @@ export default function APIModal({
     if (filtered.length > 0 && gmailAccounts.find((g) => g.id === id)?.isActive) {
       filtered[0].isActive = true;
       setGmailAccounts(filtered);
+      localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(filtered));
       localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(filtered));
       handleToggleGmailActive(filtered[0].id, filtered);
     } else {
       setGmailAccounts(filtered);
+      localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(filtered));
       localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(filtered));
       if (onActiveUserChange) {
         // If all accounts removed, log out the default sandbox state safely
@@ -452,10 +448,12 @@ export default function APIModal({
           id: "gmail-" + Date.now(),
           email: email,
           accessToken: "mock-token-" + Date.now(),
-          isActive: true
+          isActive: true,
+          isExhausted: false
         };
         updated = [...gmailAccounts.map((g) => ({ ...g, isActive: false })), newAcc];
         setGmailAccounts(updated);
+        localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(updated));
         localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(updated));
         handleToggleGmailActive(newAcc.id, updated);
       }
@@ -495,11 +493,13 @@ export default function APIModal({
           id: "gmail-custom-" + Date.now(),
           email: customEmail.trim(),
           accessToken: "mock-custom-token-" + Date.now(),
-          isActive: true
+          isActive: true,
+          isExhausted: false
         };
 
         const updated = [...gmailAccounts.map((g) => ({ ...g, isActive: false })), newAcc];
         setGmailAccounts(updated);
+        localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(updated));
         localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(updated));
         handleToggleGmailActive(newAcc.id, updated);
         
@@ -596,9 +596,13 @@ export default function APIModal({
                       <Cpu className="h-3.5 w-3.5 text-amber-500" />
                       API Configuration
                     </h4>
-                    {savedApis.length > 0 && (
+                    {savedApis.filter(a => a.isActive && a.apiKey.trim() !== "").length > 0 ? (
                       <span className="text-[9px] text-[#10b981] bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-md font-bold">
-                        {savedApis.filter(a => a.isActive).length} Active Engine
+                        {savedApis.filter(a => a.isActive && a.apiKey.trim() !== "").length} Active Engine
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-amber-500 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-md font-bold animate-pulse">
+                        No Active API Configured
                       </span>
                     )}
                   </div>
@@ -792,11 +796,13 @@ export default function APIModal({
                       <Mail className="h-3.5 w-3.5 text-red-500" />
                       Gmail Profile Sync
                     </h4>
-                    {gmailAccounts.length > 0 && (
-                      <span className="text-[9px] text-[#10b981] font-bold">
-                        {gmailAccounts.length} Active Accounts
-                      </span>
-                    )}
+                    <span className="text-[9px] font-bold">
+                      {gmailAccounts.length > 0 ? (
+                        <span className="text-[#10b981]">{gmailAccounts.length} Active Accounts</span>
+                      ) : (
+                        <span className="text-neutral-500">0 Active Accounts</span>
+                      )}
+                    </span>
                   </div>
 
                   {/* Two clean horizontal toggles: [+ Add Gmail] and [View Gmails] */}
@@ -1023,11 +1029,15 @@ export default function APIModal({
                               </div>
                               <div className="min-w-0">
                                 <span className="text-xs font-bold text-neutral-200 block truncate max-w-[150px]">{g.email}</span>
-                                <span className="text-[9px] text-[#10b981] font-mono flex items-center gap-1">
-                                  {g.isActive ? (
+                                <span className="text-[9px] font-mono flex items-center gap-1">
+                                  {g.isExhausted ? (
+                                    <span className="text-amber-500 font-bold animate-pulse flex items-center gap-1">
+                                      ⚠️ Exhausted (Failover Standby)
+                                    </span>
+                                  ) : g.isActive ? (
                                     <>
                                       <span className="h-1 w-1 rounded-full bg-emerald-500 animate-ping" />
-                                      Active Sandbox Sandbox Session
+                                      <span className="text-[#10b981]">Active Sandbox Session</span>
                                     </>
                                   ) : (
                                     <span className="text-neutral-500">Offline Standby</span>

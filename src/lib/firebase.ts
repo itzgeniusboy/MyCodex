@@ -55,7 +55,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 export const getAccessToken = async (): Promise<string | null> => {
   if (cachedAccessToken) return cachedAccessToken;
   try {
-    const listStr = localStorage.getItem("chat_gpt_ios_gmail_accounts");
+    const listStr = localStorage.getItem("pocketcodex_gmail_vault") || localStorage.getItem("chat_gpt_ios_gmail_accounts");
     if (listStr) {
       const accounts = JSON.parse(listStr);
       const active = accounts.find((a: any) => a.isActive);

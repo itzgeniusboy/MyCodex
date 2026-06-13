@@ -139,38 +139,6 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                 </p>
               </div>
 
-              {/* Quick Preset Login for Ease of Testing */}
-              <div className="mb-5">
-                <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider block mb-2 text-center">
-                  Quick Login For Testing
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleQuickLogin("itzraviking@gmail.com", "Ravi Kumar")}
-                    className="flex items-center gap-1.5 justify-center rounded-lg border border-[#222226] bg-neutral-900/60 py-2 px-2.5 text-xs font-semibold hover:bg-neutral-850 hover:border-[#333] transition"
-                    id="quick-login-itzraviking"
-                  >
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-                    Ravi Kumar
-                  </button>
-                  <button
-                    onClick={() => handleQuickLogin("alpha.tester@ai.com", "Guest Pilot")}
-                    className="flex items-center gap-1.5 justify-center rounded-lg border border-[#222226] bg-neutral-900/60 py-2 px-2.5 text-xs font-semibold hover:bg-neutral-850 hover:border-[#333] transition"
-                    id="quick-login-guest"
-                  >
-                    <span className="h-2 w-2 rounded-full bg-blue-500" />
-                    Guest Pilot
-                  </button>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="flex items-center my-4">
-                <div className="flex-1 border-t border-[#222226]" />
-                <span className="mx-3 text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">Or use form</span>
-                <div className="flex-1 border-t border-[#222226]" />
-              </div>
-
               {/* Main Login/Register Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
                 {isRegistering && (

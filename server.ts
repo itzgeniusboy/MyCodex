@@ -182,11 +182,16 @@ async function startServer() {
           <div class="space-y-3 pt-1 text-left">
             <div>
               <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-500 block mb-1 font-sans">GitHub Username</label>
-              <input id="github-username" type="text" placeholder="e.g. itzgeniusboy" value="viking" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
+              <input id="github-username" type="text" placeholder="e.g. programmer" value="" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
             </div>
             <div>
-              <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-400 block mb-1 font-sans">GitHub Token</label>
-              <input id="github-token" type="password" placeholder="gho_oauth_access_token..." value="mock_oauth_secret_token" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
+              <div class="flex items-center justify-between mb-1 flex-wrap gap-1">
+                <label class="text-[9px] uppercase font-bold tracking-wider text-neutral-400 block font-sans">GitHub Token</label>
+                <a href="https://github.com/settings/tokens/new?scopes=repo,workflow,write:discussion,admin:repo_hook&description=PocketCodex%20Autonomous%20Sandbox%20Token" target="_blank" class="text-[9px] text-amber-500 hover:text-amber-400 font-bold font-sans transition">
+                  🔗 Generate Token
+                </a>
+              </div>
+              <input id="github-token" type="password" placeholder="gho_oauth_access_token..." value="" class="w-full bg-[#1c1d22] border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-700 font-sans" />
             </div>
           </div>
           
@@ -197,8 +202,8 @@ async function startServer() {
         
         <script>
           document.getElementById('connect-btn').addEventListener('click', () => {
-            const username = document.getElementById('github-username').value.trim() || 'viking';
-            const token = document.getElementById('github-token').value.trim() || 'mock-token';
+            const username = document.getElementById('github-username').value.trim() || 'developer';
+            const token = document.getElementById('github-token').value.trim() || '';
             
             if (window.opener) {
               window.opener.postMessage({

@@ -529,6 +529,20 @@ export default function App() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [rotationStatus, setRotationStatus] = useState<string | null>(null);
+
+  const getGmailVaultArray = () => {
+    try {
+      const raw = localStorage.getItem('pocketcodex_gmail_vault') || localStorage.getItem('chat_gpt_ios_gmail_accounts');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error("Error reading pocketcodex_gmail_vault", e);
+    }
+    return [];
+  };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // --- UI Layout state ---
@@ -714,12 +728,10 @@ export default function App() {
       console.error("Server proxy fallbacks fail:", e);
     }
 
-    // High-fidelity fallback repositories list
-    const fallbackRepos = ["portfolio-site", "react-haptics-sandbox", "pocket-codex-core", "vercel-slate-theme", "ios-chatgpt-clone"];
-    setGitHubRepos(fallbackRepos);
-    setSelectedRepo(fallbackRepos[0]);
+    // Reset repositories list to clean empty array for production
+    setGitHubRepos([]);
+    setSelectedRepo("");
     setGitHubConnectedState("connected");
-    loadRepoFiles(fallbackRepos[0], username, token);
   };
 
   // Safe file tree scanner and recursive repository context mapping
@@ -821,7 +833,7 @@ export default function App() {
         })
         .then(res => res.json())
         .then(userData => {
-          const username = userData.login || "viking";
+          const username = userData.login || "developer";
           setGitHubUsername(username);
           setGitHubToken(token);
           setGitHubConnectedState("connected");
@@ -829,7 +841,7 @@ export default function App() {
           loadGitHubRepos(username, token);
         })
         .catch(() => {
-          const username = "viking";
+          const username = "developer";
           setGitHubUsername(username);
           setGitHubToken(token);
           setGitHubConnectedState("connected");
@@ -849,7 +861,7 @@ export default function App() {
         })
         .then(res => res.json())
         .then(userData => {
-          const username = userData.login || "viking";
+          const username = userData.login || "developer";
           setGitHubUsername(username);
           setGitHubToken(token);
           setGitHubConnectedState("connected");
@@ -857,7 +869,7 @@ export default function App() {
           loadGitHubRepos(username, token);
         })
         .catch(() => {
-          const username = "viking";
+          const username = "developer";
           setGitHubUsername(username);
           setGitHubToken(token);
           setGitHubConnectedState("connected");
@@ -935,10 +947,10 @@ export default function App() {
       }
     } catch (e) {}
     return {
-      email: "itzraviking@gmail.com",
-      name: "Ravi Kumar",
-      avatarUrl: "https://api.dicebear.com/7.x/bottts/svg?seed=Ravi%20Kumar",
-      isLoggedIn: true,
+      email: "guest@pocketcodex.ai",
+      name: "Guest User",
+      avatarUrl: "https://api.dicebear.com/7.x/bottts/svg?seed=Guest",
+      isLoggedIn: false,
     };
   });
 
@@ -1137,7 +1149,7 @@ const PARSER_WORKER_CODE = [
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repo: selectedRepo || "portfolio-site",
-          username: gitHubUsername || "viking",
+          username: gitHubUsername || "developer",
           token: gitHubToken || "mock-token",
           files: filesToCommit,
           commitMsg: `PocketCodex Autonomous Loop: updated ${filesToCommit.length} file(s) synchronously.`
@@ -1164,7 +1176,7 @@ const PARSER_WORKER_CODE = [
       setTimeout(triggerHapticFeedback, 150);
 
       // Reload files mapping list so we are synced with the newest commit state
-      loadRepoFiles(selectedRepo || "portfolio-site", gitHubUsername || "viking", gitHubToken || "");
+      loadRepoFiles(selectedRepo || "portfolio-site", gitHubUsername || "developer", gitHubToken || "");
 
       // Auto dismiss success toast
       setTimeout(() => {
@@ -1424,11 +1436,21 @@ const PARSER_WORKER_CODE = [
     setIsAiLoading(true);
 
     const engine = getActiveEngine();
-    const customKey = localStorage.getItem("chat_gpt_ios_custom_key") || "";
-    const apiKey = (customKey.trim() !== "") ? customKey.trim() : engine.apiKey;
-    
-    const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || apiKey.startsWith("AIzaSy");
-    
+    let vault = getGmailVaultArray();
+    let nonExhausted = vault.filter((acc: any) => !acc.isExhausted);
+    if (vault.length > 0 && nonExhausted.length === 0) {
+      // Automatic reset of exhausted profiles if all are rate-limited
+      vault = vault.map((acc: any) => ({ ...acc, isExhausted: false }));
+      localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(vault));
+      localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(vault));
+      nonExhausted = vault;
+    }
+
+    let startIndex = nonExhausted.findIndex((acc: any) => acc.isActive);
+    if (startIndex === -1) startIndex = 0;
+
+    let success = false;
+    let reply = "";
     let selectedModel = "gemini-3.5-flash";
     if (engine.provider?.toLowerCase().includes("pro")) {
       selectedModel = "gemini-3.1-pro-preview";
@@ -1438,128 +1460,231 @@ const PARSER_WORKER_CODE = [
     let apiUrl = "/api/chat";
     let fetchOptions: RequestInit = {};
 
+    let attemptIndex = startIndex;
+    const maxVaultAttempts = Math.max(1, nonExhausted.length);
+    let attemptsCount = 0;
+    let lastErr: any = null;
+
+    setRotationStatus(null);
+
     try {
-      let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
-      
-      // Append hidden context rule to the very last user message content
-      if (apiMessages.length > 0 && projectEnv !== "chat") {
-        const lastMsg = apiMessages[apiMessages.length - 1];
-        if (lastMsg.role === "user") {
-          const hiddenRule = projectEnv === "web"
-            ? "\n\n(System Context: The user is in a strict raw browser sandbox. You MUST deliver code ONLY as standard self-contained HTML/CSS/JavaScript. DO NOT use React component file types, JSX, TypeScript syntax, or npm import packages like lucide-react.)"
-            : "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)";
-          
-          lastMsg.content = lastMsg.content + hiddenRule;
-        }
+      while (!success && attemptsCount < maxVaultAttempts) {
+      let currentToken = "";
+      let currentEmail = "Primary Config";
+
+      if (nonExhausted.length > 0 && attemptIndex < nonExhausted.length) {
+        currentToken = nonExhausted[attemptIndex].accessToken;
+        currentEmail = nonExhausted[attemptIndex].email;
+      } else {
+        const customKey = localStorage.getItem("chat_gpt_ios_custom_key") || "";
+        currentToken = (customKey.trim() !== "") ? customKey.trim() : engine.apiKey;
+        currentEmail = "Primary Config";
       }
 
-      let reply = "";
-      if (isGeminiFamily && apiKey) {
-        // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
-        const modelsToTry = [
-          selectedModel,
-          "gemini-3.5-flash",
-          "gemini-flash-latest",
-          "gemini-3.1-pro-preview"
-        ];
+      const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || currentToken.startsWith("AIzaSy") || currentToken.startsWith("mock-token") || currentToken.startsWith("mock-custom-token");
 
-        let success = false;
-        let lastErr: any = null;
-
-        for (const currentModel of modelsToTry) {
-          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
-          
-          let payload: any = null;
-          if (projectEnv === "chat") {
-            // STRICT chat payload: strictly format raw user text query - no system prompt boilerplates or instruction formatters
-            payload = {
-              contents: [
-                {
-                  role: "user",
-                  parts: [{ text: text }]
-                }
-              ]
-            };
-          } else {
-            // Normal system context generation payloads
-            const contents = apiMessages.map(m => ({
-              role: m.role === "assistant" ? "model" : "user",
-              parts: [{ text: m.content }]
-            }));
-
-            let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
+      try {
+        let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
+        
+        // Append hidden context rule to the very last user message content
+        if (apiMessages.length > 0 && projectEnv !== "chat") {
+          const lastMsg = apiMessages[apiMessages.length - 1];
+          if (lastMsg.role === "user") {
+            const hiddenRule = projectEnv === "web"
+              ? "\n\n(System Context: The user is in a strict raw browser sandbox. You MUST deliver code ONLY as standard self-contained HTML/CSS/JavaScript. DO NOT use React component file types, JSX, TypeScript syntax, or npm import packages like lucide-react.)"
+              : "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)";
             
-            if (gitHubConnectedState === "connected" && selectedRepo) {
-              systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(gitHubFiles, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
+            lastMsg.content = lastMsg.content + hiddenRule;
+          }
+        }
+
+        if (isGeminiFamily && currentToken) {
+          // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
+          const modelsToTry = [
+            selectedModel,
+            "gemini-3.5-flash",
+            "gemini-flash-latest",
+            "gemini-3.1-pro-preview"
+          ];
+
+          let modelSuccess = false;
+          let modelErr: any = null;
+
+          for (const currentModel of modelsToTry) {
+            const headers: Record<string, string> = {
+              "Content-Type": "application/json"
+            };
+
+            if (currentToken.startsWith("AIzaSy")) {
+              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentToken}`;
+            } else {
+              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`;
+              headers["Authorization"] = `Bearer ${currentToken}`;
+            }
+            
+            let payload: any = null;
+            if (projectEnv === "chat") {
+              // STRICT chat payload: strictly format raw user text query - no system prompt boilerplates or instruction formatters
+              payload = {
+                contents: [
+                  {
+                    role: "user",
+                    parts: [{ text: text }]
+                  }
+                ]
+              };
+            } else {
+              // Normal system context generation payloads
+              const contents = apiMessages.map(m => ({
+                role: m.role === "assistant" ? "model" : "user",
+                parts: [{ text: m.content }]
+              }));
+
+              let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
+              
+              if (gitHubConnectedState === "connected" && selectedRepo) {
+                systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(gitHubFiles, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
+              }
+
+              payload = {
+                contents: contents,
+                systemInstruction: {
+                  parts: [{ text: systemInstruction }]
+                },
+                generationConfig: {
+                  temperature: 0.7
+                }
+              };
             }
 
-            payload = {
-              contents: contents,
-              systemInstruction: {
-                parts: [{ text: systemInstruction }]
-              },
-              generationConfig: {
-                temperature: 0.7
-              }
+            fetchOptions = {
+              method: "POST",
+              headers: headers,
+              body: JSON.stringify(payload)
             };
+
+            try {
+              const response = await fetch(apiUrl, fetchOptions);
+              const errBody = await response.text();
+              let parsed: any = null;
+              try { parsed = JSON.parse(errBody); } catch(pe) {}
+
+              const isQuotaExceeded = response.status === 429 || 
+                errBody.includes("quotaExceeded") || 
+                errBody.includes("RESOURCE_EXHAUSTED") || 
+                errBody.includes("Rate Limit Exceeded") ||
+                errBody.includes("quota exceeded");
+
+              if (isQuotaExceeded) {
+                throw new Error("QUOTA_EXHAUSTED_TRIGGER_FAILOVER: Rate limit or quota exceeded.");
+              }
+
+              if (response.ok && parsed) {
+                reply = parsed.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
+                modelSuccess = true;
+                selectedModel = currentModel; // Update final active model identifier for debug view
+                break;
+              } else {
+                throw new Error(parsed?.error?.message || `Google API returned status ${response.status}: ${errBody}`);
+              }
+            } catch (fe: any) {
+              modelErr = fe;
+              if (fe.message && fe.message.includes("QUOTA_EXHAUSTED_TRIGGER_FAILOVER")) {
+                throw fe;
+              }
+            }
           }
 
+          if (modelSuccess) {
+            success = true;
+          } else {
+            throw modelErr || new Error("All attempted Gemini model endpoints returned failure status.");
+          }
+
+        } else {
+          // Normal Node.js proxy payload fallback
+          apiUrl = "/api/chat";
           fetchOptions = {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: apiMessages,
+              customApiKey: currentToken,
+              activeEngine: engine,
+              projectEnv: projectEnv,
+              gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
+                repo: selectedRepo,
+                filename: selectedFile,
+                content: selectedFileContent
+              } : null
+            })
           };
 
-          try {
-            const response = await fetch(apiUrl, fetchOptions);
-            if (response.ok) {
-              const data = await response.json();
-              reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
-              success = true;
-              selectedModel = currentModel; // Update final active model identifier for debug view
-              break;
-            } else {
-              const errBody = await response.text();
-              lastErr = new Error(`Google API returned status ${response.status} for model ${currentModel}: ${errBody}`);
-            }
-          } catch (fe) {
-            lastErr = fe;
+          const response = await fetch(apiUrl, fetchOptions);
+          const isQuotaHttp = response.status === 429;
+          const textRes = await response.text();
+          let parsedData: any = {};
+          try { parsedData = JSON.parse(textRes); } catch(pe) {}
+
+          const hasQuotaErrorText = textRes.includes("quotaExceeded") || 
+            textRes.includes("RESOURCE_EXHAUSTED") || 
+            textRes.includes("Rate Limit Exceeded") ||
+            textRes.includes("quota exceeded") ||
+            (parsedData?.error && (
+              parsedData.error.includes("quota") || 
+              parsedData.error.includes("exceeded") ||
+              parsedData.error.includes("429") ||
+              parsedData.error.includes("exhausted")
+            ));
+
+          if (isQuotaHttp || hasQuotaErrorText) {
+            throw new Error("QUOTA_EXHAUSTED_TRIGGER_FAILOVER: Rate limit or quota exceeded in proxy.");
           }
+
+          if (!response.ok) {
+            throw new Error(parsedData?.error || "Failed server API response status");
+          }
+
+          reply = parsedData.reply;
+          success = true;
         }
 
-        if (!success) {
-          throw lastErr || new Error("All attempted Gemini model endpoints returned failure status.");
-        }
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`Token attempt with account ${currentEmail} failed:`, err.message || err);
 
-      } else {
-        // Normal Node.js proxy payload fallback
-        apiUrl = "/api/chat";
-        fetchOptions = {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: apiMessages,
-            customApiKey: customKey,
-            activeEngine: engine,
-            projectEnv: projectEnv,
-            gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
-              repo: selectedRepo,
-              filename: selectedFile,
-              content: selectedFileContent
-            } : null
-          })
-        };
+        const isQuotaError = err.message && err.message.includes("QUOTA_EXHAUSTED_TRIGGER_FAILOVER");
 
-        const response = await fetch(apiUrl, fetchOptions);
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "Failed server API response status");
+        if (isQuotaError && nonExhausted.length > 0) {
+          setRotationStatus(`Auto-Failover active: Switching from rate-limited profile (${currentEmail})...`);
+          
+          const failedAcc = nonExhausted[attemptIndex];
+          if (failedAcc) {
+            const freshVault = getGmailVaultArray().map((acc: any) => {
+              if (acc.email === failedAcc.email || acc.id === failedAcc.id) {
+                return { ...acc, isExhausted: true };
+              }
+              return acc;
+            });
+            localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(freshVault));
+            localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(freshVault));
+            nonExhausted = freshVault.filter((acc: any) => !acc.isExhausted);
+          }
+
+          attemptIndex = (attemptIndex + 1) % Math.max(1, nonExhausted.length);
+          attemptsCount++;
+        } else {
+          // Break immediately on non-quota terminal errors
+          break;
         }
-        const data = await response.json();
-        reply = data.reply;
       }
+    }
+
+    setRotationStatus(null);
+
+    if (!success) {
+      throw lastErr || new Error("All attempted failover account credentials returned quota exhaustion or failures.");
+    }
 
       const assistantMsg: Message = {
         id: `msg-${Date.now() + 1}`,
@@ -2054,13 +2179,18 @@ const PARSER_WORKER_CODE = [
               {/* Simulated continuous typing or backend model fetching indicator */}
               {isAiLoading && (
                 <div className="flex items-start justify-start w-full">
-                  <div className="flex flex-col w-full">
+                  <div className="flex flex-col w-full gap-1">
                     <div className="flex items-center gap-1.5 bg-neutral-900/40 border border-[#1b1b1e] rounded-2xl px-4 py-3 h-10 w-fit">
                       {/* Pulse waves */}
                       <span className="h-2 w-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "0ms" }} />
                       <span className="h-2 w-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
                       <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: "300ms" }} />
                     </div>
+                    {rotationStatus && (
+                      <span className="text-[10px] text-amber-500 font-bold ml-1 animate-pulse flex items-center gap-1">
+                        🔄 {rotationStatus}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -2342,7 +2472,7 @@ const PARSER_WORKER_CODE = [
                           <div className="flex justify-between items-center pt-1 border-t border-neutral-800/50">
                             <span className="text-[9px] text-[#10b981] font-extrabold flex items-center gap-1 leading-none">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                              {gitHubUsername || 'viking'}
+                              {gitHubUsername || 'developer'}
                             </span>
                             <button
                               type="button"
