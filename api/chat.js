@@ -97,6 +97,17 @@ export default async function handler(req, res) {
       
       const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
 
+      // Sanitize model to prevent mismatched provider values
+      let activeModel = customModel || "llama-3.3-70b-versatile";
+      if (
+        activeModel.startsWith("gemini-") ||
+        activeModel.startsWith("gpt-") ||
+        activeModel.startsWith("claude-") ||
+        activeModel.startsWith("deepseek-")
+      ) {
+        activeModel = "llama-3.3-70b-versatile";
+      }
+
       const response = await fetch(groqUrl, {
         method: "POST",
         headers: {
@@ -104,7 +115,7 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: customModel || "llama-3.3-70b-versatile",
+          model: activeModel,
           messages: limitedMessages.map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.content
@@ -133,10 +144,21 @@ export default async function handler(req, res) {
     // OPENAI ROUTING
     // ------------------------------------------------------------------------
     } else if (provider.includes("openai")) {
-      console.log(`Routing request to OpenAI completions proxy with model: ${customModel || "gpt-4o-mini"}...`);
       const openaiUrl = "https://api.openai.com/v1/chat/completions";
       
       const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
+      let activeModel = customModel || "gpt-4o-mini";
+      if (
+        activeModel.startsWith("gemini-") ||
+        activeModel.startsWith("claude-") ||
+        activeModel.startsWith("llama-") ||
+        activeModel.startsWith("deepseek-")
+      ) {
+        activeModel = "gpt-4o-mini";
+      }
+
+      console.log(`Routing request to OpenAI completions proxy with model: ${activeModel}...`);
 
       const response = await fetch(openaiUrl, {
         method: "POST",
@@ -145,7 +167,7 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: customModel || "gpt-4o-mini",
+          model: activeModel,
           messages: limitedMessages.map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.content
@@ -174,10 +196,21 @@ export default async function handler(req, res) {
     // ANTHROPIC ROUTING
     // ------------------------------------------------------------------------
     } else if (provider.includes("anthropic")) {
-      console.log(`Routing request to Anthropic Messages proxy with model: ${customModel || "claude-3-5-sonnet"}...`);
       const anthropicUrl = "https://api.anthropic.com/v1/messages";
 
       const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
+      let activeModel = customModel || "claude-3-5-sonnet";
+      if (
+        activeModel.startsWith("gemini-") ||
+        activeModel.startsWith("gpt-") ||
+        activeModel.startsWith("llama-") ||
+        activeModel.startsWith("deepseek-")
+      ) {
+        activeModel = "claude-3-5-sonnet";
+      }
+
+      console.log(`Routing request to Anthropic Messages proxy with model: ${activeModel}...`);
 
       const response = await fetch(anthropicUrl, {
         method: "POST",
@@ -187,7 +220,7 @@ export default async function handler(req, res) {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: customModel || "claude-3-5-sonnet",
+          model: activeModel,
           messages: limitedMessages.map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.content
@@ -210,10 +243,21 @@ export default async function handler(req, res) {
     // DEEPSEEK ROUTING
     // ------------------------------------------------------------------------
     } else if (provider.includes("deepseek")) {
-      console.log(`Routing request to DeepSeek API proxy with model: ${customModel || "deepseek-chat"}...`);
       const deepseekUrl = "https://api.deepseek.com/chat/completions";
 
       const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
+      let activeModel = customModel || "deepseek-chat";
+      if (
+        activeModel.startsWith("gemini-") ||
+        activeModel.startsWith("gpt-") ||
+        activeModel.startsWith("llama-") ||
+        activeModel.startsWith("claude-")
+      ) {
+        activeModel = "deepseek-chat";
+      }
+
+      console.log(`Routing request to DeepSeek API proxy with model: ${activeModel}...`);
 
       const response = await fetch(deepseekUrl, {
         method: "POST",
@@ -222,7 +266,7 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: customModel || "deepseek-chat",
+          model: activeModel,
           messages: limitedMessages.map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.content

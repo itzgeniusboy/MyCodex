@@ -708,6 +708,25 @@ export default function App() {
       if (envProviders.includes("openai")) return { modelId: "gpt-4o", provider: "openai" };
       return { modelId: "gemini-3.1-pro-preview", provider: "gemini" };
     }
+
+    // Auto resolution based on active provider
+    try {
+      const activeProvider = (localStorage.getItem("chat_gpt_ios_active_provider") || "Google Gemini").toLowerCase();
+      if (activeProvider.includes("groq")) {
+        return { modelId: "llama-3.3-70b-versatile", provider: "groq" };
+      }
+      if (activeProvider.includes("openai")) {
+        return { modelId: "gpt-4o-mini", provider: "openai" };
+      }
+      if (activeProvider.includes("anthropic") || activeProvider.includes("claude")) {
+        return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
+      }
+      if (activeProvider.includes("deepseek")) {
+        return { modelId: "deepseek-chat", provider: "deepseek" };
+      }
+    } catch (e) {
+      console.error(e);
+    }
     return { modelId: "gemini-3.5-flash", provider: "gemini" };
   };
   const [attachedFiles, setAttachedFiles] = useState<{
