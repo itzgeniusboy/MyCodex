@@ -323,18 +323,22 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                     className="mb-4 rounded-xl border border-red-500/20 bg-[#120707] p-3 text-xs text-red-400 font-medium overflow-hidden"
                     id="otp-error-alert"
                   >
-                    {errorMessage.includes("unauthorized-domain") ? (
-                      <div className="text-left space-y-3">
+                    {errorMessage.includes("unauthorized-domain") || errorMessage.includes("popup-closed-by-user") ? (
+                      <div className="text-left space-y-3 animate-fade-in">
                         <div className="flex items-center gap-2 text-red-400 font-bold">
                           <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
-                          <span>Firebase Auth Domain Error</span>
+                          <span>
+                            {errorMessage.includes("unauthorized-domain") ? "Firebase Auth Domain Error" : "Auth Popup Closed / Domain Issue"}
+                          </span>
                         </div>
                         <p className="text-[11px] text-neutral-300 leading-relaxed font-normal">
-                          Your sandbox environment's active Cloud Run domains must be allowed in your Firebase project configuration.
+                          {errorMessage.includes("unauthorized-domain")
+                            ? "Your environment's active domain must be allowed in your Firebase project configuration."
+                            : "The sign-in popup was cancelled, blocked, or closed. If you are hosting on a custom domain (like Vercel), you MUST add your domain to the authorized list in Firebase!"}
                         </p>
                         
                         <div className="space-y-1.5 p-2 bg-[#0c0505] rounded-lg border border-red-950/40">
-                          <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-widest block font-sans">Domains to Authorize:</span>
+                          <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-widest block font-sans">Domain to Authorize:</span>
                           {getDevAndPreDomains().map((domain, i) => (
                             <div key={i} className="flex items-center justify-between gap-2 bg-[#140b0b] px-2 py-1 rounded text-[10px] font-mono select-all text-neutral-200 border border-red-950/20">
                               <span className="truncate">{domain}</span>
@@ -357,16 +361,16 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
                             </div>
                           ))}
                         </div>
-
+ 
                         <div className="space-y-1 text-[11px] text-neutral-400 leading-relaxed border-t border-neutral-800/40 pt-2 font-normal">
                           <p className="font-semibold text-neutral-300">Quick Setup Instructions:</p>
                           <ol className="list-decimal list-inside space-y-1 pl-1 text-[10px]">
                             <li>
                               Open your <a href="https://console.firebase.google.com/project/pocketcodex-production/authentication/settings" target="_blank" rel="noopener noreferrer" className="text-red-400 hover:underline inline-flex items-center gap-0.5 font-bold">Firebase Console <ExternalLink className="h-2.5 w-2.5 inline" /></a>
                             </li>
-                            <li>Navigate to <strong className="text-neutral-300">Settings</strong> tab at the top.</li>
-                            <li>Click <strong className="text-neutral-300">Authorized domains</strong> in the side sub-panel.</li>
-                            <li>Click <strong className="text-neutral-300">Add domain</strong> and paste the copied domain(s).</li>
+                            <li>Navigate to the <strong className="text-neutral-300">Settings</strong> tab at the top.</li>
+                            <li>Click <strong className="text-neutral-300">Authorized domains</strong>.</li>
+                            <li>Click <strong className="text-neutral-300">Add domain</strong>, paste your domain, and save.</li>
                           </ol>
                         </div>
                       </div>
