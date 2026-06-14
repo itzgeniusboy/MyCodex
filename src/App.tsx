@@ -50,9 +50,73 @@ import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
+// Helper function to bundle index.html, styles.css, and script.js dynamically
+function bundleHtmlCssJs(html: string, css: string, js: string): string {
+  let cleanedHtml = html;
+  
+  // Extract pure html if it's wrapped in markdown wrappers
+  const codeBlockRegex = /^`{3,}(?:html)?\s*([\s\S]*?)\s*`{3,}/im;
+  const blockMatch = cleanedHtml.match(codeBlockRegex);
+  if (blockMatch) {
+    cleanedHtml = blockMatch[1].trim();
+  }
+  
+  let cleanedCss = css;
+  const cssMatch = css.match(/^`{3,}(?:css)?\s*([\s\S]*?)\s*`{3,}/im);
+  if (cssMatch) {
+    cleanedCss = cssMatch[1].trim();
+  } else {
+    cleanedCss = cleanedCss.replace(/^`{3,}(?:css)?\s*/gi, "").replace(/`{3,}/g, "");
+  }
+  
+  let cleanedJs = js;
+  const jsMatch = js.match(/^`{3,}(?:js|javascript)?\s*([\s\S]*?)\s*`{3,}/im);
+  if (jsMatch) {
+    cleanedJs = jsMatch[1].trim();
+  } else {
+    cleanedJs = cleanedJs.replace(/^`{3,}(?:js|javascript)?\s*/gi, "").replace(/`{3,}/g, "");
+  }
+
+  // Inject or replace styles
+  if (cleanedCss.trim()) {
+    if (cleanedHtml.includes("styles.css")) {
+      cleanedHtml = cleanedHtml.replace(/<link[^>]*href=["'].*styles\.css["'][^>]*>/gi, `<style>${cleanedCss}</style>`);
+    } else if (cleanedHtml.includes("</head>")) {
+      cleanedHtml = cleanedHtml.replace("</head>", `<style>${cleanedCss}</style></head>`);
+    } else {
+      cleanedHtml = cleanedHtml + `<style>${cleanedCss}</style>`;
+    }
+  }
+
+  // Inject or replace scripts
+  if (cleanedJs.trim()) {
+    if (cleanedHtml.includes("script.js")) {
+      cleanedHtml = cleanedHtml.replace(/<script[^>]*src=["'].*script\.js["'][^>]*><\/script>/gi, `<script>${cleanedJs}</script>`);
+    } else if (cleanedHtml.includes("</body>")) {
+      cleanedHtml = cleanedHtml.replace("</body>", `<script>${cleanedJs}</script></body>`);
+    } else {
+      cleanedHtml = cleanedHtml + `<script>${cleanedJs}</script>`;
+    }
+  }
+
+  return cleanedHtml;
+}
+
 // Helper function to prepare code for safe and live-running iframe compilation (transpiles React JSX/TSX code)
-function prepareSandboxCode(rawCode: string, env: "web" | "android" | "chat" = "web"): string {
+function prepareSandboxCode(rawCode: string, env: "web" | "android" | "chat" = "web", files?: { filename: string; content: string }[]): string {
   if (!rawCode) return "";
+
+  // If we have HTML/CSS/JS files in the files lookup list, bundle them seamlessly
+  if (files && files.length > 0) {
+    const htmlFile = files.find(f => f.filename.toLowerCase().endsWith("index.html") || f.filename.toLowerCase() === "index.html");
+    const cssFile = files.find(f => f.filename.toLowerCase().endsWith("styles.css") || f.filename.toLowerCase() === "styles.css");
+    const jsFile = files.find(f => f.filename.toLowerCase().endsWith("script.js") || f.filename.toLowerCase() === "script.js");
+    
+    if (htmlFile && (cssFile || jsFile)) {
+      return bundleHtmlCssJs(htmlFile.content, cssFile ? cssFile.content : "", jsFile ? jsFile.content : "");
+    }
+  }
+
   let cleaned = rawCode.trim();
   
   // 1. First extract pure code block if wrapped in markdown wrappers (e.g. ```tsx ... ```)
@@ -765,6 +829,93 @@ export default function App() {
   const [showInspectorPanel, setShowInspectorPanel] = useState(false);
   const [inspectorLogOutput, setInspectorLogOutput] = useState<string[]>([]);
 
+  // Cyberpunk Terminal Server Logs Simulation States
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  // Cyberpunk Terminal scroll and initialization effects & action triggers
+  useEffect(() => {
+    if (terminalEndRef.current) {
+      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [terminalLogs]);
+
+  const handleTestEndpoint = (endpoint: string) => {
+    triggerHapticFeedback();
+    const nowStr = new Date().toLocaleTimeString();
+    let actionLogs: string[] = [];
+
+    if (endpoint === "GET_USERS") {
+      actionLogs = [
+        `[${nowStr}] INCOMING REQUEST: GET /users.php`,
+        `[${nowStr}] [GATEWAY] Routing verified via session Token`,
+        `[${nowStr}] [SQL] Executing query: SELECT * FROM users LIMIT 10;`,
+        `[${nowStr}] [SQL] Database returned 3 records successfully.`,
+        `[${nowStr}] [PHP API RESPONSE 200 OK]:`,
+        JSON.stringify([
+          { id: 1, username: "admin", email: "itzraviking@gmail.com", role: "Principal System Architect" },
+          { id: 2, username: "pocketcodex-bot", email: "engine@pocketcodex.ai", role: "AI Sandbox compiler" },
+          { id: 3, username: "guest-guest", email: "guest@pocketcodex.ai", role: "Beta Tester" }
+        ], null, 2)
+      ];
+    } else if (endpoint === "POST_CREATE") {
+      actionLogs = [
+        `[${nowStr}] INCOMING REQUEST: POST /create.php`,
+        `[${nowStr}] [BODY] Payload: { name: "Interactive Visitor", role: "Explorer" }`,
+        `[${nowStr}] [SQL] Executing statement: INSERT INTO users (username, role) VALUES ('Interactive Visitor', 'Explorer');`,
+        `[${nowStr}] [SQL] Row inserted successfully. ID auto-increment value: 4`,
+        `[${nowStr}] [PHP API RESPONSE 201 Created]:`,
+        JSON.stringify({ status: "success", message: "User created!", id: 4 }, null, 2)
+      ];
+    } else if (endpoint === "RUN_SQL") {
+      actionLogs = [
+        `[${nowStr}] RUNNING CODE: ${sandboxFilename}`,
+        `[${nowStr}] Parsing structure: CREATE TABLE IF NOT EXISTS system_telemetry (id INT, key VARCHAR(50), value TEXT);`,
+        `[${nowStr}] Executed successfully on PostgreSQL core environment.`,
+        `[${nowStr}] Result layout:`,
+        `+----+---------------------------+------------------------------+`,
+        `| ID | VARIABLE KEY              | RESOLVED VALUE               |`,
+        `+----+---------------------------+------------------------------+`,
+        `| 1  | pocketcodex_engine_state  | ACTIVE / GREEN               |`,
+        `| 2  | database_engine_driver    | PostgreSQL v16.1 (Simulated) |`,
+        `| 3  | active_environment_port   | TCP 3000 (Forwarded)         |`,
+        `+----+---------------------------+------------------------------+`
+      ];
+    } else if (endpoint === "RESET") {
+      actionLogs = [
+        `[${nowStr}] [SYSTEM] RESTARTING POCKETCODEX BACKEND INSTANCE...`,
+        `[${nowStr}] [SYSTEM] Killing active process pools...`,
+        `[${nowStr}] [INFO] Re-initializing PHP engine and Database connectors...`,
+        `[${nowStr}] [SUCCESS] Core services rebooted gracefully. Engine ready.`
+      ];
+    }
+
+    setTerminalLogs(prev => [...prev, ...actionLogs]);
+  };
+
+  useEffect(() => {
+    const thread = threads.find((t) => t.id === activeThreadId);
+    const msgs = thread ? thread.messages : [];
+    const lastAss = [...msgs].reverse().find(m => m.role === "assistant");
+    const lastF = lastAss ? parseModifiedFilesSync(lastAss.content) : [];
+    const checkPhpOrSql = sandboxFilename.toLowerCase().endsWith(".php") || 
+                          sandboxFilename.toLowerCase().endsWith(".sql") ||
+                          lastF.some(f => f.filename.toLowerCase().endsWith(".php") || f.filename.toLowerCase().endsWith(".sql"));
+
+    if (checkPhpOrSql) {
+      const nowStr = new Date().toLocaleTimeString();
+      setTerminalLogs([
+        `[${nowStr}] [SYSTEM] INITIALIZING POCKETCODEX BACKEND CONTAINER v1.2.8...`,
+        `[${nowStr}] [INFO] Starting PHP-FPM FastCGI server process on port 3000...`,
+        `[${nowStr}] [INFO] Reading configuration api/connect.php...`,
+        `[${nowStr}] [SUCCESS] PHP bootloader hooked. Server listening on host 0.0.0.0:3000`,
+        `[${nowStr}] [INFO] Parsing local database schema from SQL code nodes...`,
+        `[${nowStr}] [DATABASE] Synchronized with temporary SQLite/PostgreSQL in-memory engine.`,
+        `[${nowStr}] [SUCCESS] Database compiled and online. Ready for API testing requests.`
+      ]);
+    }
+  }, [sandboxFilename, activeThreadId, threads]);
+
   // Intro loader timeout and authentication gateway triggers
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1174,17 +1325,27 @@ const PARSER_WORKER_CODE = [
   "self.onmessage = function(e) {",
   "  const text = e.data.text || '';",
   "  const updates = [];",
+  "  const matchedFiles = new Set();",
+  "  let match;",
+  "  ",
+  "  // Pattern 0: Regex targeting strict filepaths e.g., ```html filepath=\"index.html\"",
+  "  const strictFilepathRegex = /`{3}([a-zA-Z0-9_\\-\\.]+)?\\s+filepath=[\"']?([a-zA-Z0-9_\\-\\.\\/]+)[\"']?\\s*\\n([\\s\\S]*?)`{3}/g;",
+  "  while ((match = strictFilepathRegex.exec(text)) !== null) {",
+  "    const filename = match[2].trim();",
+  "    const content = match[3];",
+  "    updates.push({ filename, content });",
+  "    matchedFiles.add(filename);",
+  "  }",
   "  ",
   "  const blockWithFilenameRegex = /`{3}([a-zA-Z0-9_\\-\\.]+)?[:\\s]([a-zA-Z0-9_\\-\\.\\/]+)\\n([\\s\\S]*?)`{3}/g;",
-  "  let match;",
-  "  const matchedFiles = new Set();",
-  "  ",
   "  while ((match = blockWithFilenameRegex.exec(text)) !== null) {",
   "    const filename = match[2].trim();",
   "    const content = match[3];",
   "    if (filename.indexOf('.') !== -1 || filename.indexOf('/') !== -1) {",
-  "      updates.push({ filename, content });",
-  "      matchedFiles.add(filename);",
+  "      if (!matchedFiles.has(filename)) {",
+  "        updates.push({ filename, content });",
+  "        matchedFiles.add(filename);",
+  "      }",
   "    }",
   "  }",
   "  ",
@@ -1204,19 +1365,29 @@ const PARSER_WORKER_CODE = [
 
   const parseModifiedFilesSync = (text: string) => {
     const updates: { filename: string; content: string }[] = [];
+    const matchedFiles = new Set<string>();
+    let match;
     
+    // Pattern 0: Regex targeting strict filepaths e.g., ```html filepath="index.html"
+    const strictFilepathRegex = /```([a-zA-Z0-9_\-\.]+)?\s+filepath=["']?([a-zA-Z0-9_\-\.\/]+)["']?\s*\n([\s\S]*?)```/g;
+    while ((match = strictFilepathRegex.exec(text)) !== null) {
+      const filename = match[2].trim();
+      const content = match[3];
+      updates.push({ filename, content });
+      matchedFiles.add(filename);
+    }
+
     // Pattern 1: Regex targeting standard file-labeled code blocks or language block labels:
     // e.g., ```tsx src/App.tsx   or   ```html:index.html
     const blockWithFilenameRegex = /```([a-zA-Z0-9_\-\.]+)?[:\s]([a-zA-Z0-9_\-\.\/]+)\n([\s\S]*?)```/g;
-    let match;
-    const matchedFiles = new Set<string>();
-    
     while ((match = blockWithFilenameRegex.exec(text)) !== null) {
       const filename = match[2].trim();
       const content = match[3];
       if (filename.includes(".") || filename.includes("/")) {
-        updates.push({ filename, content });
-        matchedFiles.add(filename);
+        if (!matchedFiles.has(filename)) {
+          updates.push({ filename, content });
+          matchedFiles.add(filename);
+        }
       }
     }
     
@@ -1906,13 +2077,13 @@ const PARSER_WORKER_CODE = [
             if (userGreeting) {
               hiddenRule = "\n\n(System Context: The user just said a basic greeting. Since they are in the Web App Builder mode, introduce yourself briefly as PocketCodex - Web App Builder, and invite them to describe the web application they want to build. Do NOT output a project tree or code since they have not requested an app to be built yet.)";
             } else {
-              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build a new Web App project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── index.html, ├── script.js, etc.). Next, provide a short, professional architecture explanation, and finally write code inside markdown code blocks (using \`\`\`html) as standard, self-contained interactive sandbox code. Keep the application visually polished with a premium look, and use Tailwind CSS or custom styles inside the HTML.)";
+              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build a new Web App project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── index.html, ├── script.js, ├── styles.css, etc.). Next, provide a short, professional architecture explanation, and finally write code inside markdown code blocks. CRITICAL MANDATE: Every code block MUST have a strict `filepath` attribute inside the markdown code block identifiers (e.g. ```html filepath=\"index.html\" or ```css filepath=\"styles.css\" or ```js filepath=\"script.js\" or ```php filepath=\"api/connect.php\"). Ensure that every code block includes this literal wrapper attribute so the file compiler parser can compile files to folders correctly in the background for automatic GitHub syncing.)";
             }
           } else if (projectEnv === "android") {
             if (userGreeting) {
               hiddenRule = "\n\n(System Context: The user just said a basic greeting. Since they are in the Android APK Builder mode, introduce yourself briefly as PocketCodex - Android APK Builder, and invite them to describe the Android APK/app they want to build. Do NOT output code or a project tree since they have not requested an app to be built yet.)";
             } else {
-              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build an Android APK project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── AndroidManifest.xml, ├── MainActivity.kt, ├── build.gradle). Next, provide native components, structural nodes, activity setup details, or Kotlin/NDK implementation code inside markdown code blocks.)";
+              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build an Android APK project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── AndroidManifest.xml, ├── MainActivity.kt, ├── build.gradle). Next, provide native components, structural nodes, activity setup details, or Kotlin/NDK implementation code inside markdown code blocks. CRITICAL MANDATE: Every code block MUST have a strict `filepath` attribute inside the markdown code block identifiers (e.g. ```xml filepath=\"AndroidManifest.xml\" or ```kotlin filepath=\"MainActivity.kt\"). Ensure that every code block includes this literal wrapper attribute so the file compiler parser can compile files to folders correctly in the background for automatic GitHub syncing.)";
             }
           }
           
@@ -2154,6 +2325,100 @@ const PARSER_WORKER_CODE = [
       }
     }
   }, [mainTab, activeMessages]);
+
+  const lastAssMsg = [...activeMessages].reverse().find(m => m.role === "assistant");
+  const lastFiles = lastAssMsg ? parseModifiedFilesSync(lastAssMsg.content) : [];
+  const isPhpOrSql = sandboxFilename.toLowerCase().endsWith(".php") || 
+                     sandboxFilename.toLowerCase().endsWith(".sql") ||
+                     lastFiles.some(f => f.filename.toLowerCase().endsWith(".php") || f.filename.toLowerCase().endsWith(".sql"));
+
+  const renderCyberpunkTerminal = () => {
+    return (
+      <div id="cyberpunk-console-terminal-view" className="w-full h-full bg-[#0a0b0d] text-neutral-300 font-mono text-[11px] flex flex-col overflow-hidden relative border border-neutral-900 shadow-2xl rounded-2xl select-text">
+        {/* Console Top Header */}
+        <div className="flex items-center justify-between bg-[#121316] border-b border-neutral-900 px-4 py-2 select-none flex-none">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[10px] uppercase font-black tracking-widest text-[#ff5500]">POCKETCODEX BACKEND ENGINE TERMINAL WORKSPACE</span>
+          </div>
+          <span className="text-[9px] bg-[#1a1b1e] border border-neutral-850 text-neutral-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold select-none">
+            CONTAINER PORT 3000
+          </span>
+        </div>
+
+        {/* Terminal logs content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2 select-text scrollbar-thin scrollbar-thumb-neutral-850 scrollbar-track-transparent font-mono text-[10px] sm:text-xs">
+          {terminalLogs.map((log, lidx) => {
+            const isError = log.includes("[SYSTEM]") || log.includes("Error:") || log.includes("Exception");
+            const isSuccess = log.includes("[SUCCESS]") || log.includes("RESPONSE 200") || log.includes("RESPONSE 201");
+            const isDb = log.includes("[DATABASE]") || log.includes("[SQL]");
+            let colorClass = "text-[#f5f5f7]";
+            if (isError) colorClass = "text-amber-500 font-extrabold";
+            else if (isSuccess) colorClass = "text-[#10b981] font-bold";
+            else if (isDb) colorClass = "text-blue-400 font-semibold";
+            else if (log.startsWith("[")) colorClass = "text-neutral-500";
+
+            // If the log is JSON formatted (starts with { or [)
+            if (log.trim().startsWith("{") || log.trim().startsWith("[")) {
+              return (
+                <pre key={lidx} className="bg-black/50 p-2.5 rounded border border-neutral-850 text-[10px] sm:text-xs text-emerald-400 overflow-x-auto select-all leading-relaxed whitespace-pre font-mono">
+                  {log}
+                </pre>
+              );
+            }
+
+            return (
+              <div key={lidx} className={`${colorClass} leading-relaxed select-text truncate max-w-full break-all font-mono`}>
+                {log}
+              </div>
+            );
+          })}
+          <div ref={terminalEndRef} />
+        </div>
+
+        {/* Endpoint Interactive Testing Dashboard */}
+        <div className="bg-[#0e0f12] border-t border-neutral-900 p-3 flex-none select-none">
+          <p className="text-[9px] text-neutral-400 font-extrabold uppercase tracking-widest mb-1.5 flex items-center gap-1.5 justify-between">
+            <span>⚡ COADEX INTEGRATED API BENCH</span>
+            <span className="text-[8px] tracking-normal font-medium normal-case text-neutral-500">Run sandbox actions live</span>
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleTestEndpoint("GET_USERS")}
+              className="flex items-center justify-center gap-1 bg-[#141518] hover:bg-[#1f2026] text-[10px] text-zinc-300 font-bold border border-neutral-800 p-2 rounded-lg transition active:scale-95 cursor-pointer"
+            >
+              <span className="text-[#10b981] font-extrabold text-[9px] border border-[#10b981]/20 px-1 rounded">GET</span>
+              <span className="truncate">/users.php</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTestEndpoint("POST_CREATE")}
+              className="flex items-center justify-center gap-1 bg-[#141518] hover:bg-[#1f2026] text-[10px] text-zinc-300 font-bold border border-neutral-800 p-2 rounded-lg transition active:scale-95 cursor-pointer"
+            >
+              <span className="text-blue-400 font-extrabold text-[9px] border border-blue-400/20 px-1 rounded">POST</span>
+              <span className="truncate">/create.php</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTestEndpoint("RUN_SQL")}
+              className="flex items-center justify-center gap-1 bg-[#141518] hover:bg-[#1f2026] text-[10px] text-zinc-300 font-bold border border-neutral-800 p-2 rounded-lg transition active:scale-95 cursor-pointer"
+            >
+              <span className="text-amber-500 font-extrabold text-[9px] border border-amber-500/20 px-1 rounded font-mono">SQL</span>
+              <span className="truncate">System DB</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTestEndpoint("RESET")}
+              className="flex items-center justify-center gap-1 bg-[#1c0c0d] hover:bg-[#2c1314] text-[10px] text-red-500 font-bold border border-red-500/10 p-2 rounded-lg transition active:scale-95 cursor-pointer"
+            >
+              <span>Reboot</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -2527,6 +2792,7 @@ const PARSER_WORKER_CODE = [
                                 pre({ node, children, ...props }) {
                                   return (
                                     <MarkdownPreBlock
+                                      node={node}
                                       triggerHapticFeedback={triggerHapticFeedback}
                                       setSandboxCode={setSandboxCode}
                                       setSandboxFilename={setSandboxFilename}
@@ -3016,33 +3282,40 @@ const PARSER_WORKER_CODE = [
               {previewDevice === "iphone" ? (
                 /* Phone (📱 Layout): Standard handheld device specifications with dynamic speaker notch shape and bezel casing */
                 <div 
-                  className="border-[10px] border-black rounded-[36px] mx-auto shadow-2xl relative overflow-hidden bg-[#0c0c0e]"
+                  className="border-[10px] border-black rounded-[36px] mx-auto shadow-2xl relative overflow-hidden bg-[#0c0c0e] flex flex-col"
                   style={{ 
                     width: "320px", 
                     height: "550px"
                   }}
                 >
                   {/* Speaker Notch Simulator */}
-                  <div className="w-16 h-3 bg-black absolute top-1 left-1/2 -translate-x-1/2 rounded-full z-50 pointer-events-none" />
+                  <div className="w-16 h-3 bg-black absolute top-1 left-1/2 -translate-x-1/2 rounded-full z-50 pointer-events-none flex-none" />
                   
                   {/* Active Compilation Overlay Loader */}
-                  {compilationStatus === "compiling" && (
+                  {(compilationStatus === "compiling" || isAiLoading) && (
                     <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
                       <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
-                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">POCKETCODEX ENGINE BUNDLING...</p>
                     </div>
                   )}
-                  <iframe
-                    title="PocketCodex Main Running Preview"
-                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
-                    className="w-full h-full border-0 bg-[#0c0c0e]"
-                    style={{
-                      willChange: "transform",
-                      transformStyle: "preserve-3d",
-                      WebkitBackfaceVisibility: "hidden",
-                      backfaceVisibility: "hidden",
-                    }}
-                  />
+                  
+                  <div className="flex-1 min-h-0 relative w-full h-full">
+                    {isPhpOrSql ? (
+                      renderCyberpunkTerminal()
+                    ) : (
+                      <iframe
+                        title="PocketCodex Main Running Preview"
+                        srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv, lastFiles) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                        className="w-full h-full border-0 bg-[#0c0c0e]"
+                        style={{
+                          willChange: "transform",
+                          transformStyle: "preserve-3d",
+                          WebkitBackfaceVisibility: "hidden",
+                          backfaceVisibility: "hidden",
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
               ) : previewDevice === "macbook" ? (
                 /* Desktop (💻 Layout): Sleek Desktop PC Widescreen layout with elegant container framing */
@@ -3066,25 +3339,29 @@ const PARSER_WORKER_CODE = [
                     </div>
                   </div>
                   
-                  <div className="flex-1 relative min-h-0 w-full">
+                  <div className="flex-1 relative min-h-0 w-full h-full">
                     {/* Active Compilation Overlay Loader */}
-                    {compilationStatus === "compiling" && (
+                    {(compilationStatus === "compiling" || isAiLoading) && (
                       <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
                         <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
-                        <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                        <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">POCKETCODEX ENGINE BUNDLING...</p>
                       </div>
                     )}
-                    <iframe
-                      title="PocketCodex Main Running Preview"
-                      srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
-                      className="w-full h-full border-0 bg-[#0c0c0e]"
-                      style={{
-                        willChange: "transform",
-                        transformStyle: "preserve-3d",
-                        WebkitBackfaceVisibility: "hidden",
-                        backfaceVisibility: "hidden",
-                      }}
-                    />
+                    {isPhpOrSql ? (
+                      renderCyberpunkTerminal()
+                    ) : (
+                      <iframe
+                        title="PocketCodex Main Running Preview"
+                        srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv, lastFiles) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                        className="w-full h-full border-0 bg-[#0c0c0e]"
+                        style={{
+                          willChange: "transform",
+                          transformStyle: "preserve-3d",
+                          WebkitBackfaceVisibility: "hidden",
+                          backfaceVisibility: "hidden",
+                        }}
+                      />
+                    )}
                   </div>
                 </div>
               ) : (
@@ -3097,23 +3374,27 @@ const PARSER_WORKER_CODE = [
                   }}
                 >
                   {/* Active Compilation Overlay Loader */}
-                  {compilationStatus === "compiling" && (
+                  {(compilationStatus === "compiling" || isAiLoading) && (
                     <div className="absolute inset-0 bg-[#0c0c0e]/95 z-20 flex flex-col items-center justify-center space-y-3">
                       <div className="w-8 h-8 rounded-full border-2 border-neutral-900 border-t-amber-500 animate-spin" />
-                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">Coadex Bundling...</p>
+                      <p className="text-xs text-amber-500 uppercase tracking-widest font-mono font-bold animate-pulse">POCKETCODEX ENGINE BUNDLING...</p>
                     </div>
                   )}
-                  <iframe
-                    title="PocketCodex Main Running Preview"
-                    srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
-                    className="w-full h-full border-0 bg-[#0c0c0e]"
-                    style={{
-                      willChange: "transform",
-                      transformStyle: "preserve-3d",
-                      WebkitBackfaceVisibility: "hidden",
-                      backfaceVisibility: "hidden",
-                    }}
-                  />
+                  {isPhpOrSql ? (
+                    renderCyberpunkTerminal()
+                  ) : (
+                    <iframe
+                      title="PocketCodex Main Running Preview"
+                      srcDoc={sandboxCode?.trim() ? prepareSandboxCode(sandboxCode, projectEnv, lastFiles) : `<!DOCTYPE html><html><head><style>body { background: #0c0c0e; color: #a4a4a8; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; } h1 { color: #f5f5f5; font-size: 1.4rem; margin-bottom: 8px; font-weight: 600; } p { max-width: 320px; font-size: 0.85rem; line-height: 1.6; opacity: 0.8; } .icon { font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite; } @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }</style></head><body><div class="icon">🌐</div><h1>No Active Preview</h1><p>Generate some code in Chat or click <strong>View Artifact</strong> on an assistant code block to test it live here.</p></body></html>`}
+                      className="w-full h-full border-0 bg-[#0c0c0e]"
+                      style={{
+                        willChange: "transform",
+                        transformStyle: "preserve-3d",
+                        WebkitBackfaceVisibility: "hidden",
+                        backfaceVisibility: "hidden",
+                      }}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -3432,6 +3713,7 @@ const PARSER_WORKER_CODE = [
 
 interface MarkdownPreBlockProps {
   children: React.ReactNode;
+  node?: any;
   triggerHapticFeedback: () => void;
   setSandboxCode: (code: string) => void;
   setSandboxFilename: (filename: string) => void;
@@ -3442,6 +3724,7 @@ interface MarkdownPreBlockProps {
 
 function MarkdownPreBlock({
   children,
+  node,
   triggerHapticFeedback,
   setSandboxCode,
   setSandboxFilename,
@@ -3460,12 +3743,31 @@ function MarkdownPreBlock({
   
   const codeVal = getRawText(children).trim();
 
-  const detectFilename = (text: string): string => {
+  const detectFilename = (text: string, xmlNode?: any): string => {
+    if (xmlNode) {
+      // 1. Look for filepath raw properties from node attributes
+      const codeNode = xmlNode.children && xmlNode.children[0];
+      if (codeNode && codeNode.properties) {
+        if (codeNode.properties.filepath) {
+          return codeNode.properties.filepath;
+        }
+      }
+      // 2. Look for filepath parsed in standard markdown block meta string (e.g. ```html filepath="style.css")
+      if (codeNode && codeNode.data && codeNode.data.meta) {
+        const metaStr = codeNode.data.meta;
+        const fpMatch = /filepath=["']?([a-zA-Z0-9_\-\.\/]+)["']?/.exec(metaStr);
+        if (fpMatch) return fpMatch[1];
+      }
+    }
+
     const firstLine = text.split("\n")[0].trim();
-    const match = /^(?:\/\/\s*|#\s*|<!--\s*|\/\*\s*)([\w.-]+\.(?:html|js|ts|tsx|css|json|py|java|sh|md))(?:\s*\*\/|\s*-->)?\s*$/i.exec(firstLine);
+    // Support -- comment for SQL, // and /* for PHP/JS/TS, # for python/shell, <!-- for HTML
+    const match = /^(?:\/\/\s*|#\s*|<!--\s*|\/\*\s*|--\s*)([\w.\-/]+\.[\w-]+)(?:\s*\*\/|\s*-->)?\s*$/i.exec(firstLine);
     if (match && match[1]) {
       return match[1];
     }
+    
+    // Check content patterns for fallbacks
     if (text.includes("<!DOCTYPE html>") || text.includes("<html") || text.includes("<body")) {
       return "index.html";
     }
@@ -3475,28 +3777,36 @@ function MarkdownPreBlock({
     if (text.includes("const ") && text.includes("express =")) {
       return "server.ts";
     }
+    if (text.includes("<?php")) {
+      return "index.php";
+    }
+    if (text.includes("CREATE TABLE") || text.includes("SELECT ") || text.includes("INSERT INTO")) {
+      return "query.sql";
+    }
     if (text.includes("@import") || text.includes("@theme")) {
       return "index.css";
     }
     return "app.tsx";
   };
 
-  const fileName = detectFilename(codeVal);
+  const fileName = detectFilename(codeVal, node);
 
   const getLanguageLabel = (name: string): string => {
     const ext = name.split(".").pop()?.toLowerCase();
     switch (ext) {
-      case "html": return "HTML";
-      case "css": return "CSS";
+      case "html": return "HTML5";
+      case "css": return "CSS Grid";
       case "ts": return "TypeScript";
       case "tsx": return "React TSX";
       case "js": return "JavaScript";
       case "jsx": return "React JSX";
       case "py": return "Python";
-      case "json": return "JSON";
-      case "sh": return "Shell";
-      case "md": return "Markdown";
-      default: return "TypeScript";
+      case "json": return "JSON Config";
+      case "sh": return "Shell Bash";
+      case "md": return "Markdown Doc";
+      case "php": return "PHP Backend Node";
+      case "sql": return "SQL Database Schema";
+      default: return ext?.toUpperCase() || "Source Code";
     }
   };
 
