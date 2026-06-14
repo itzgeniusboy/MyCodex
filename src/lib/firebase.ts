@@ -60,7 +60,7 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (withGmailScopes = false): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (withGmailScopes = false): Promise<{ user: User; accessToken: string }> => {
   try {
     isSigningIn = true;
     const provider = new GoogleAuthProvider();
@@ -69,43 +69,15 @@ export const googleSignIn = async (withGmailScopes = false): Promise<{ user: Use
       provider.addScope("https://www.googleapis.com/auth/gmail.send");
     }
 
-    // Detect if mobile/tablet or embedded webview to prefer Redirect directly
-    const isMobileDevice = typeof window !== "undefined" && (
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-      window.innerWidth < 1024
-    );
-
-    if (isMobileDevice) {
-      console.log("Mobile/tablet environment detected. Initiating signInWithRedirect...");
-      await signInWithRedirect(auth, provider);
-      return null; // Page will redirect and refresh automatically
+    // Always use standard signInWithPopup as it is highly compatible with custom domains on mobile
+    // and successfully retrieves & persists credentials within the same active tab session.
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error("Failed to retrieve Google OAuth access token from Firebase credentials.");
     }
-
-    // High performance desktop flow: standard signInWithPopup
-    try {
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (!credential?.accessToken) {
-        throw new Error("Failed to retrieve Google OAuth access token from Firebase credentials.");
-      }
-      cachedAccessToken = credential.accessToken;
-      return { user: result.user, accessToken: cachedAccessToken };
-    } catch (popupError: any) {
-      const errorCode = popupError?.code || "";
-      console.warn("Popup authentication warning:", errorCode, popupError);
-      
-      // Fall back to redirect if popup is closed by user or blocked entirely
-      if (
-        errorCode.includes("popup-closed-by-user") ||
-        errorCode.includes("popup-blocked") ||
-        errorCode.includes("cancelled-popup-request")
-      ) {
-        console.log("Popup was closed or blocked. Gracefully redirecting the user instead...");
-        await signInWithRedirect(auth, provider);
-        return null;
-      }
-      throw popupError;
-    }
+    cachedAccessToken = credential.accessToken;
+    return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Firebase Sign in error details:", error);
     throw error;
