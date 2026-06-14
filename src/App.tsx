@@ -597,7 +597,7 @@ export default function App() {
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
 
   // Custom attachment states & input refs
-  const [projectEnv, setProjectEnv] = useState<"web" | "android" | "chat">("web");
+  const [projectEnv, setProjectEnv] = useState<"web" | "android" | "chat">("chat");
   const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
 
@@ -620,6 +620,8 @@ export default function App() {
     { id: "claude-3-5-sonnet", name: "Claude 3.5 Sonnet", provider: "anthropic", icon: "🧠" },
     { id: "deepseek-chat", name: "DeepSeek V3", provider: "deepseek", icon: "⚡" },
     { id: "deepseek-reasoner", name: "DeepSeek R1", provider: "deepseek", icon: "🧠" },
+    { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B (Groq)", provider: "groq", icon: "🧠" },
+    { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B (Groq)", provider: "groq", icon: "⚡" },
   ];
 
   const getActiveProviders = () => {
@@ -636,6 +638,7 @@ export default function App() {
               if (prov.includes("openai")) active.push("openai");
               if (prov.includes("anthropic") || prov.includes("claude")) active.push("anthropic");
               if (prov.includes("deepseek")) active.push("deepseek");
+              if (prov.includes("groq")) active.push("groq");
             }
           });
         }
@@ -651,6 +654,7 @@ export default function App() {
       if (activeProvider.includes("openai")) active.push("openai");
       if (activeProvider.includes("anthropic") || activeProvider.includes("claude")) active.push("anthropic");
       if (activeProvider.includes("deepseek")) active.push("deepseek");
+      if (activeProvider.includes("groq")) active.push("groq");
     }
 
     if (active.length === 0) {

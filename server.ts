@@ -813,6 +813,9 @@ async function startServer() {
         // Slice context payload to keep completions speedy
         const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
 
+        // Use customModel if provided, fallback to standard llama-3.3-70b-versatile
+        const activeModel = customModel || "llama-3.3-70b-versatile";
+
         const response = await fetch(groqUrl, {
           method: "POST",
           headers: {
@@ -820,7 +823,7 @@ async function startServer() {
             "Authorization": `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: "llama3-8b-8192",
+            model: activeModel,
             messages: limitedMessages.map((m: any) => ({
               role: m.role === "assistant" ? "assistant" : "user",
               content: m.content
@@ -1087,7 +1090,13 @@ async function startServer() {
         return res.json({ reply });
       }
     } catch (error: any) {
-      console.error("Gemini API server side error:", error);
+      console.error("Gemini/Groq API server side error:", error);
+      
+      // If the user has explicitly provided a custom API Key, let's return the real error so they can debug
+      if (req.body?.customApiKey && req.body.customApiKey.trim() !== "" && !req.body.customApiKey.startsWith("session-verified-token-")) {
+        return res.status(500).json({ error: `[API Engine Error]: ${error.message || error}` });
+      }
+
       // Fallback response for keys issue to guarantee flawless demo experience
       const lastUserMsg = req.body.messages?.[req.body.messages.length - 1]?.content || "";
       const reply = getSimulatedResponse(lastUserMsg);

@@ -379,6 +379,12 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     console.error("Gemini/Groq API server side error on Vercel serverless:", error);
+    
+    // If the user has explicitly provided a custom API Key, let's return the real error so they can debug
+    if (req.body?.customApiKey && req.body.customApiKey.trim() !== "" && !req.body.customApiKey.startsWith("session-verified-token-")) {
+      return res.status(500).json({ error: `[API Engine Error]: ${error.message || error}` });
+    }
+
     const lastUserMsg = req.body?.messages?.[req.body.messages.length - 1]?.content || "";
     const reply = getSimulatedResponse(lastUserMsg);
     return res.status(200).json({ reply });
