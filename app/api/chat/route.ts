@@ -1,7 +1,17 @@
-// Vercel Serverless Handler for PocketCodex Dynamic AI Router
-// File: /api/chat.js
+import { NextRequest, NextResponse } from "next/server";
 
-const PROVIDER_CONFIGS = {
+// 21 AI Providers Configuration
+interface ProviderConfig {
+  baseUrl: string;
+  defaultModel: string;
+  models: {
+    Low: string;
+    Med: string;
+    High: string;
+  };
+}
+
+const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   gemini: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/v1",
     defaultModel: "gemini-2.5-flash",
@@ -109,8 +119,8 @@ const PROVIDER_CONFIGS = {
   }
 };
 
-const getNormalizedProviderKey = (input) => {
-  const normalized = String(input || "").toLowerCase();
+const getNormalizedProviderKey = (input: string): string => {
+  const normalized = input.toLowerCase();
   if (normalized.includes("gemini") || normalized.includes("google")) return "gemini";
   if (normalized.includes("openai") || normalized.includes("chatgpt")) return "openai";
   if (normalized.includes("anthropic") || normalized.includes("claude")) return "anthropic";
@@ -135,7 +145,7 @@ const getNormalizedProviderKey = (input) => {
   return "gemini";
 };
 
-const getEnvKeyName = (prov) => {
+const getEnvKeyName = (prov: string): string => {
   switch (prov) {
     case "gemini": return "GEMINI_API_KEY";
     case "openai": return "OPENAI_API_KEY";
@@ -162,25 +172,7 @@ const getEnvKeyName = (prov) => {
   }
 };
 
-export default async function handler(req, res) {
-  // CORS Support
-  res.setHeader("Access-Control-Allow-Credentials", true);
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, x-gemini-api-key"
-  );
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
-    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
-  }
-
+export async function POST(req: NextRequest) {
   try {
     const { 
       messages, 
@@ -191,44 +183,33 @@ export default async function handler(req, res) {
       activeEngine,
       customProvider,
       customModel,
-      stream = false
-    } = req.body;
+      stream = true
+    } = await req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "Messages list is required." });
+      return NextResponse.json({ error: "Messages list is required." }, { status: 400 });
     }
 
-    // 1. Prompt Intent Classification
+    // 1. Analyze prompt intent on the last message
     const lastMsgContent = messages[messages.length - 1]?.content || "";
-    const lowercaseMsg = String(lastMsgContent).toLowerCase();
+    const lowercaseMsg = lastMsgContent.toLowerCase();
 
     const isCodingPrompt = /build|coding|react|next\.js|refactor|component|code|architecture|database|api|backend|frontend|css|html|script|typescript|javascript|developer|engineer|write a|implement/i.test(lowercaseMsg);
 
     const isReasoningPrompt = /reason|math|logic|explanation|why|solve|proof|derivation|complex|algorithm|optimization|analysis|science|deep/i.test(lowercaseMsg);
 
-    // 2. Resolve Active Keys (User overrides + Env fallbacks)
-    const activeKeys = {};
+    // 2. Resolve Active Keys (Custom list + Env fallbacks)
+    const activeKeys: Record<string, string> = {};
     for (const prov of Object.keys(PROVIDER_CONFIGS)) {
       const envVar = getEnvKeyName(prov);
       if (process.env[envVar]) {
-        activeKeys[prov] = process.env[envVar];
+        activeKeys[prov] = process.env[envVar] || "";
       }
-    }
-
-    // Check header custom key
-    let headerApiKey = req.headers ? (req.headers["x-gemini-api-key"] || "") : "";
-    if (headerApiKey && !headerApiKey.startsWith("session-verified-token-")) {
-      let deduced = "gemini";
-      if (headerApiKey.startsWith("gsk_")) deduced = "groq";
-      else if (headerApiKey.startsWith("sk-")) deduced = "openai";
-      else if (headerApiKey.startsWith("AIzaSy")) deduced = "gemini";
-      else if (customProvider) deduced = getNormalizedProviderKey(customProvider);
-      activeKeys[deduced] = headerApiKey.trim();
     }
 
     if (Array.isArray(savedApiKeys)) {
       for (const item of savedApiKeys) {
-        const provName = getNormalizedProviderKey(item.provider);
+        const provName = getNormalizedProviderKey(item.provider || "");
         const keyVal = item.secretKey || item.apiKey || item.key;
         if (keyVal && keyVal.trim() !== "" && !keyVal.startsWith("session-verified-token-")) {
           activeKeys[provName] = keyVal.trim();
@@ -245,12 +226,7 @@ export default async function handler(req, res) {
       activeKeys[deducedProv] = customApiKey.trim();
     }
 
-    // Force default process.env fallback if GEMINI_API_KEY is available
-    if (!activeKeys["gemini"] && process.env.GEMINI_API_KEY) {
-      activeKeys["gemini"] = process.env.GEMINI_API_KEY;
-    }
-
-    // 3. Routing Matrix
+    // 3. Routing Intelligence Logic
     let activeProvider = "gemini";
     let activeModel = "gemini-2.5-flash";
 
@@ -282,6 +258,7 @@ export default async function handler(req, res) {
         activeModel = config.models.Med || config.defaultModel;
       }
     } else {
+      // Tier: Low, Medium, High
       let chosen = customProvider ? getNormalizedProviderKey(customProvider) : "";
       if (!chosen && activeEngine && activeEngine.provider) {
         chosen = getNormalizedProviderKey(activeEngine.provider);
@@ -293,23 +270,24 @@ export default async function handler(req, res) {
         activeProvider = loadedKeys.includes("gemini") ? "gemini" : (loadedKeys[0] || "gemini");
       }
       const config = PROVIDER_CONFIGS[activeProvider] || PROVIDER_CONFIGS["gemini"];
-      const tier = routingLevel || "Medium";
+      const tier = (routingLevel || "Medium") as "Low" | "Medium" | "High";
       activeModel = config.models[tier] || config.defaultModel;
     }
 
     const apiKey = activeKeys[activeProvider];
     if (!apiKey) {
-      return res.status(400).json({ 
-        error: `API key for routing provider "${activeProvider}" is not configured. Please supply a key in the settings panel.` 
-      });
+      return NextResponse.json({ 
+        error: `API key for routing provider "${activeProvider}" is not saved. Please set it in the console.` 
+      }, { status: 400 });
     }
 
     const config = PROVIDER_CONFIGS[activeProvider];
     let requestUrl = `${config.baseUrl}/chat/completions`;
-    const headers = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json"
     };
 
+    // Specific header structures
     if (activeProvider === "gemini") {
       requestUrl = `https://generativelanguage.googleapis.com/v1beta/openai/v1/chat/completions?key=${apiKey}`;
     } else if (activeProvider === "anthropic") {
@@ -325,11 +303,12 @@ export default async function handler(req, res) {
 
     const limitedMessages = messages.length > 15 ? messages.slice(-15) : messages;
 
-    let requestBody = {};
+    // Body structures
+    let requestBody: any = {};
     if (activeProvider === "anthropic") {
       requestBody = {
         model: activeModel,
-        messages: limitedMessages.map((m) => ({
+        messages: limitedMessages.map((m: any) => ({
           role: m.role === "assistant" ? "assistant" : "user",
           content: m.content
         })),
@@ -338,10 +317,10 @@ export default async function handler(req, res) {
         stream: stream
       };
     } else {
-      const isO1 = String(activeModel).startsWith("o1");
+      const isO1 = activeModel.startsWith("o1");
       requestBody = {
         model: activeModel,
-        messages: limitedMessages.map((m) => ({
+        messages: limitedMessages.map((m: any) => ({
           role: m.role === "assistant" ? "assistant" : "user",
           content: m.content
         })),
@@ -352,7 +331,7 @@ export default async function handler(req, res) {
       }
     }
 
-    console.log(`[POCKETCODEX BACKEND ROUTER]: Resolved provider ${activeProvider.toUpperCase()} (${activeModel}), streamEnabled: ${stream}`);
+    console.log(`[ROUTE INTENT SELECTOR]: Routed to ${activeProvider.toUpperCase()} (${activeModel}) via ${routingLevel} tier`);
 
     const response = await fetch(requestUrl, {
       method: "POST",
@@ -362,118 +341,105 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(500).json({ error: `Provider error (${response.status}): ${errText}` });
+      return NextResponse.json({ error: `API upstream error (${response.status}): ${errText}` }, { status: 500 });
     }
 
     if (!stream) {
       const data = await response.json();
-      let reply = "";
+      let reply = "No output";
       if (activeProvider === "anthropic") {
         reply = data.content?.[0]?.text || "";
       } else {
         reply = data.choices?.[0]?.message?.content || "";
       }
-      return res.status(200).json({ reply });
+      return NextResponse.json({ reply });
     }
 
-    // Server-side-to-client streaming of raw text tokens
-    res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive"
+    // 4. Stream handling across all 21 providers
+    const textEncoder = new TextEncoder();
+    const customReadable = new ReadableStream({
+      async start(controller) {
+        if (!response.body) {
+          controller.enqueue(textEncoder.encode("Error: Streaming unavailable."));
+          controller.close();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        const processOpenAIChunk = (line: string): string | null => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === "data: [DONE]") return null;
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const json = JSON.parse(trimmed.slice(6));
+              return json.choices?.[0]?.delta?.content || "";
+            } catch (e) {
+              return "";
+            }
+          }
+          return "";
+        };
+
+        const processAnthropicChunk = (line: string): string | null => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const json = JSON.parse(trimmed.slice(6));
+              if (json.type === "content_block_delta" && json.delta?.text) {
+                return json.delta.text;
+              }
+              if (json.delta?.text) {
+                return json.delta.text;
+              }
+            } catch (e) {
+              return "";
+            }
+          }
+          return "";
+        };
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              let parsedToken = "";
+              if (activeProvider === "anthropic") {
+                parsedToken = processAnthropicChunk(line) || "";
+              } else {
+                parsedToken = processOpenAIChunk(line) || "";
+              }
+              if (parsedToken) {
+                controller.enqueue(textEncoder.encode(parsedToken));
+              }
+            }
+          }
+          controller.close();
+        } catch (err: any) {
+          controller.enqueue(textEncoder.encode(`\n[Stream Error]: ${err.message}`));
+          controller.close();
+        }
+      }
     });
 
-    const reader = response.body.getReader ? response.body.getReader() : null;
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    const processOpenAIChunk = (line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === "data: [DONE]") return "";
-      if (trimmed.startsWith("data: ")) {
-        try {
-          const json = JSON.parse(trimmed.slice(6));
-          return json.choices?.[0]?.delta?.content || "";
-        } catch (e) {
-          return "";
-        }
+    return new Response(customReadable, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
       }
-      return "";
-    };
+    });
 
-    const processAnthropicChunk = (line) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("data: ")) {
-        try {
-          const json = JSON.parse(trimmed.slice(6));
-          if (json.type === "content_block_delta" && json.delta?.text) {
-            return json.delta.text;
-          }
-          if (json.delta?.text) {
-            return json.delta.text;
-          }
-        } catch (e) {
-          return "";
-        }
-      }
-      return "";
-    };
-
-    if (reader) {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            let parsedToken = "";
-            if (activeProvider === "anthropic") {
-              parsedToken = processAnthropicChunk(line);
-            } else {
-              parsedToken = processOpenAIChunk(line);
-            }
-            if (parsedToken) {
-              res.write(parsedToken);
-            }
-          }
-        }
-        res.end();
-      } catch (err) {
-        res.write(`\n[Stream Error]: ${err.message}`);
-        res.end();
-      }
-    } else {
-      try {
-        for await (const value of response.body) {
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            let parsedToken = "";
-            if (activeProvider === "anthropic") {
-              parsedToken = processAnthropicChunk(line);
-            } else {
-              parsedToken = processOpenAIChunk(line);
-            }
-            if (parsedToken) {
-              res.write(parsedToken);
-            }
-          }
-        }
-        res.end();
-      } catch (err) {
-        res.write(`\n[Stream Error]: ${err.message}`);
-        res.end();
-      }
-    }
-
-  } catch (error) {
-    console.error("Vercel Chat endpoint error:", error);
-    return res.status(500).json({ error: error.message || "Internal server route error" });
+  } catch (error: any) {
+    console.error("Intelligent Routing Error:", error);
+    return NextResponse.json({ error: error.message || "Internal Routing Error" }, { status: 500 });
   }
 }

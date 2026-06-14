@@ -19,6 +19,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { UserProfile } from "../types";
+import PocketCodexLogo from "./PocketCodexLogo";
 
 
 
@@ -402,28 +403,8 @@ export default function APIModal({
               </button>
 
               {/* Title Section */}
-              <div className="flex items-center gap-3 pb-4 border-b border-neutral-900">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-950 border border-neutral-800 relative overflow-hidden shrink-0 shadow-lg">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/15 via-[#FF5500]/5 to-transparent rounded-xl pointer-events-none" />
-                  <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-5 w-5">
-                    <defs>
-                      <radialGradient id="centralGlowModalHead" cx="50%" cy="50%" r="50%">
-                        <stop offset="0%" stopColor="#FF7300" stopOpacity="1" />
-                        <stop offset="50%" stopColor="#FF5500" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#FF5500" stopOpacity="0" />
-                      </radialGradient>
-                    </defs>
-                    <circle cx="50" cy="50" r="28" fill="url(#centralGlowModalHead)" opacity="0.45" />
-                    <path d="M 33 32 L 18 50 L 33 68" stroke="#FF5500" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.8" />
-                    <path d="M 67 32 L 82 50 L 67 68" stroke="#FF5500" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.8" />
-                    <circle cx="50" cy="50" r="11" fill="#141416" stroke="#FF5500" strokeWidth="1.5" />
-                    <circle cx="50" cy="50" r="6" fill="#FF7300" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-sm font-black tracking-tight text-neutral-100 uppercase">PocketCodex Sandbox</h3>
-                  <p className="text-[10px] text-amber-500 tracking-wider font-extrabold uppercase">Multi-Profile Settings Console</p>
-                </div>
+              <div className="flex items-center gap-3 pb-4 border-b border-neutral-900 w-full">
+                <PocketCodexLogo size="md" />
               </div>
 
               {/* Workspace Body Layout */}

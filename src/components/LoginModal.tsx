@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { X, Mail, ArrowRight, ArrowLeft, Loader2, Lock, Copy, CheckCircle2, ExternalLink, AlertTriangle } from "lucide-react";
 import { UserProfile } from "../types";
 import { googleSignIn } from "../lib/firebase";
+import PocketCodexLogo from "./PocketCodexLogo";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -303,14 +304,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
 
               {/* Header */}
               <div className="flex flex-col items-center text-center mt-2 mb-5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900 border border-neutral-800 shadow-lg mb-4 relative overflow-hidden">
-                  <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-neutral-700 to-neutral-500" />
-                  <Lock className="h-5 w-5 text-neutral-400" />
-                </div>
-                <h3 className="text-lg font-bold tracking-tight text-white mb-1.5 justify-center">
-                  PocketCodex Access
-                </h3>
-                <p className="text-xs text-neutral-400 max-w-xs leading-relaxed">
+                <PocketCodexLogo size="lg" variant="vertical" className="mb-3" />
+                <p className="text-xs text-neutral-400 max-w-xs leading-relaxed mt-2">
                   Sign in to verify credentials and access your workspace.
                 </p>
               </div>

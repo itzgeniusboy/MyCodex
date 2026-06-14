@@ -44,6 +44,7 @@ import LoginModal from "./components/LoginModal";
 import VoiceOverlay from "./components/VoiceOverlay";
 import SettingsModal from "./components/SettingsModal";
 import APIModal from "./components/APIModal";
+import PocketCodexLogo from "./components/PocketCodexLogo";
 import { Message, ChatThread, UserProfile, PresetPrompt } from "./types";
 import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -691,42 +692,47 @@ export default function App() {
       const opt = modelOptions.find(o => o.id === selectedCustomModel);
       return opt ? { modelId: opt.id, provider: opt.provider } : { modelId: "gemini-3.5-flash", provider: "gemini" };
     }
+
+    // Determine working provider based on the user's active API engine selection
+    const activeProviderRaw = (localStorage.getItem("chat_gpt_ios_active_provider") || "Google Gemini").toLowerCase();
+    let preferredProvider = "gemini";
+    if (activeProviderRaw.includes("groq")) preferredProvider = "groq";
+    else if (activeProviderRaw.includes("openai") || activeProviderRaw.includes("chatgpt")) preferredProvider = "openai";
+    else if (activeProviderRaw.includes("anthropic") || activeProviderRaw.includes("claude")) preferredProvider = "anthropic";
+    else if (activeProviderRaw.includes("deepseek")) preferredProvider = "deepseek";
+
     const envProviders = getActiveProviders();
+    const finalProvider = envProviders.includes(preferredProvider) ? preferredProvider : (envProviders[0] || "gemini");
 
     if (level === "Low") {
-      if (envProviders.includes("openai")) return { modelId: "gpt-4o-mini", provider: "openai" };
+      if (finalProvider === "groq") return { modelId: "llama-3.1-8b-instant", provider: "groq" };
+      if (finalProvider === "openai") return { modelId: "gpt-4o-mini", provider: "openai" };
+      if (finalProvider === "anthropic") return { modelId: "claude-3-5-haiku", provider: "anthropic" };
+      if (finalProvider === "deepseek") return { modelId: "deepseek-chat", provider: "deepseek" };
       return { modelId: "gemini-3.5-flash", provider: "gemini" };
     }
+
     if (level === "Medium") {
-      if (envProviders.includes("anthropic")) return { modelId: "claude-3-5-haiku", provider: "anthropic" };
-      if (envProviders.includes("openai")) return { modelId: "gpt-4o-mini", provider: "openai" };
+      if (finalProvider === "groq") return { modelId: "llama-3.3-70b-versatile", provider: "groq" };
+      if (finalProvider === "openai") return { modelId: "gpt-4o-mini", provider: "openai" };
+      if (finalProvider === "anthropic") return { modelId: "claude-3-5-haiku", provider: "anthropic" };
+      if (finalProvider === "deepseek") return { modelId: "deepseek-chat", provider: "deepseek" };
       return { modelId: "gemini-3.5-flash", provider: "gemini" };
     }
+
     if (level === "High") {
-      if (envProviders.includes("anthropic")) return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
-      if (envProviders.includes("deepseek")) return { modelId: "deepseek-reasoner", provider: "deepseek" };
-      if (envProviders.includes("openai")) return { modelId: "gpt-4o", provider: "openai" };
+      if (finalProvider === "groq") return { modelId: "llama-3.3-70b-versatile", provider: "groq" };
+      if (finalProvider === "openai") return { modelId: "gpt-4o", provider: "openai" };
+      if (finalProvider === "anthropic") return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
+      if (finalProvider === "deepseek") return { modelId: "deepseek-reasoner", provider: "deepseek" };
       return { modelId: "gemini-3.1-pro-preview", provider: "gemini" };
     }
 
     // Auto resolution based on active provider
-    try {
-      const activeProvider = (localStorage.getItem("chat_gpt_ios_active_provider") || "Google Gemini").toLowerCase();
-      if (activeProvider.includes("groq")) {
-        return { modelId: "llama-3.3-70b-versatile", provider: "groq" };
-      }
-      if (activeProvider.includes("openai")) {
-        return { modelId: "gpt-4o-mini", provider: "openai" };
-      }
-      if (activeProvider.includes("anthropic") || activeProvider.includes("claude")) {
-        return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
-      }
-      if (activeProvider.includes("deepseek")) {
-        return { modelId: "deepseek-chat", provider: "deepseek" };
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    if (finalProvider === "groq") return { modelId: "llama-3.3-70b-versatile", provider: "groq" };
+    if (finalProvider === "openai") return { modelId: "gpt-4o-mini", provider: "openai" };
+    if (finalProvider === "anthropic") return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
+    if (finalProvider === "deepseek") return { modelId: "deepseek-chat", provider: "deepseek" };
     return { modelId: "gemini-3.5-flash", provider: "gemini" };
   };
   const [attachedFiles, setAttachedFiles] = useState<{
@@ -1916,14 +1922,20 @@ const PARSER_WORKER_CODE = [
 
       const resolved = getModelForRoutingLevel(routingLevel);
       let activeApiKey = userApiKey;
-      if (routingLevel !== "Auto") {
-        const providerKey = getSavedKeyForProvider(resolved.provider);
-        if (providerKey) {
-          activeApiKey = providerKey;
-        }
+      const providerKey = getSavedKeyForProvider(resolved.provider);
+      if (providerKey) {
+        activeApiKey = providerKey;
       }
 
       const apiUrl = "/api/chat";
+      let savedApiKeysPayload: any[] = [];
+      try {
+        const savedListStr = localStorage.getItem("pocket_codex_saved_apis");
+        if (savedListStr) {
+          savedApiKeysPayload = JSON.parse(savedListStr);
+        }
+      } catch (pe) {}
+
       const fetchOptions = {
         method: "POST",
         headers: { 
@@ -1938,6 +1950,8 @@ const PARSER_WORKER_CODE = [
           routingLevel: routingLevel,
           customModel: resolved.modelId,
           customProvider: resolved.provider,
+          savedApiKeys: savedApiKeysPayload,
+          stream: true,
           gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
             repo: selectedRepo,
             filename: selectedFile,
@@ -1947,16 +1961,13 @@ const PARSER_WORKER_CODE = [
       };
 
       const response = await fetch(apiUrl, fetchOptions);
-      const textRes = await response.text();
-      let parsedData: any = {};
-      try { parsedData = JSON.parse(textRes); } catch(pe) {}
 
       if (!response.ok) {
+        const textRes = await response.text();
+        let parsedData: any = {};
+        try { parsedData = JSON.parse(textRes); } catch(pe) {}
         throw new Error(parsedData?.error || `Failed proxy response status ${response.status}: ${textRes}`);
       }
-
-      reply = parsedData.reply || "No response generated by model.";
-      success = true;
 
       const targetThreadId = currentThread ? currentThread.id : activeThreadId;
       const assistantMsgId = `msg-${Date.now() + 1}`;
@@ -1977,36 +1988,73 @@ const PARSER_WORKER_CODE = [
         )
       );
 
-      // Rapid and responsive streaming animation loop
-      const words = reply.split(" ");
-      let wordIdx = 0;
-      let streamedContent = "";
+      success = true;
 
-      const streamTimer = setInterval(() => {
-        const wordsPerTick = Math.max(3, Math.ceil(words.length / 40));
-        const wordsSubset = words.slice(wordIdx, wordIdx + wordsPerTick);
-        streamedContent += (wordIdx === 0 ? "" : " ") + wordsSubset.join(" ");
-        wordIdx += wordsPerTick;
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let accumulatedText = "";
 
-        setThreads((prev) =>
-          prev.map((t) => {
-            if (t.id === targetThreadId) {
-              return {
-                ...t,
-                messages: t.messages.map((m) =>
-                  m.id === assistantMsgId ? { ...m, content: streamedContent } : m
-                ),
-                updatedAt: new Date()
-              };
-            }
-            return t;
-          })
-        );
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        if (wordIdx >= words.length) {
-          clearInterval(streamTimer);
+          const chunk = decoder.decode(value, { stream: true });
+          accumulatedText += chunk;
+
+          setThreads((prev) =>
+            prev.map((t) => {
+              if (t.id === targetThreadId) {
+                return {
+                  ...t,
+                  messages: t.messages.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: accumulatedText } : m
+                  ),
+                  updatedAt: new Date()
+                };
+              }
+              return t;
+            })
+          );
         }
-      }, 30);
+        reply = accumulatedText;
+      } else {
+        const textRes = await response.text();
+        let parsedData: any = {};
+        try { parsedData = JSON.parse(textRes); } catch(pe) {}
+        reply = parsedData.reply || textRes || "No response generated by model.";
+
+        // Rapid and responsive streaming fallback animation loop
+        const words = reply.split(" ");
+        let wordIdx = 0;
+        let streamedContent = "";
+
+        const streamTimer = setInterval(() => {
+          const wordsPerTick = Math.max(3, Math.ceil(words.length / 40));
+          const wordsSubset = words.slice(wordIdx, wordIdx + wordsPerTick);
+          streamedContent += (wordIdx === 0 ? "" : " ") + wordsSubset.join(" ");
+          wordIdx += wordsPerTick;
+
+          setThreads((prev) =>
+            prev.map((t) => {
+              if (t.id === targetThreadId) {
+                return {
+                  ...t,
+                  messages: t.messages.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: streamedContent } : m
+                  ),
+                  updatedAt: new Date()
+                };
+              }
+              return t;
+            })
+          );
+
+          if (wordIdx >= words.length) {
+            clearInterval(streamTimer);
+          }
+        }, 30);
+      }
 
     } catch (err: any) {
       console.error(err);
@@ -2122,28 +2170,8 @@ const PARSER_WORKER_CODE = [
             <div className="absolute inset-0 bg-[radial-gradient(#1c1c22_1px,transparent_1px)] [background-size:16px_16px] opacity-25 pointer-events-none" />
 
             <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
-              {/* Outer Amber pulse ring & logo container */}
-              <div className="relative mb-6 flex items-center justify-center h-20 w-20">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-amber-500/10 animate-ping opacity-60" />
-                <span className="absolute inline-flex h-[130%] w-[130%] rounded-full bg-orange-500/5 animate-pulse opacity-25" />
-                
-                {/* Main spinning loader bezel */}
-                <div className="absolute inset-0 rounded-full border-2 border-dashed border-amber-500/30 animate-spin [animation-duration:12s]" />
-
-                {/* Inner stylized chip logo icon */}
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-900 border border-amber-500/30 p-2 shadow-2xl relative overflow-hidden">
-                  <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
-                  <Cpu className="h-7 w-7 text-amber-500 animate-pulse" />
-                </div>
-              </div>
-
-              {/* Title & subtitle */}
-              <h2 className="text-xl font-black uppercase tracking-widest text-[#f5f5f7] mb-1 flex items-center gap-1">
-                POCKETCODEX <span className="text-[#ff5500] font-sans font-normal text-xs tracking-normal normal-case border border-[#ff5500]/30 px-1.5 rounded-md bg-[#ff5500]/5">v1.2.8</span>
-              </h2>
-              <p className="text-[10px] uppercase tracking-widest font-mono text-neutral-500 mb-6">
-                Microarchitecture Sandbox Compiler
-              </p>
+              {/* Premium PocketCodex Cyberpunk Logo */}
+              <PocketCodexLogo size="xl" variant="vertical" className="mb-8" />
 
               {/* Loader bars */}
               <div className="w-48 h-[3px] bg-neutral-900/60 rounded-full overflow-hidden border border-neutral-800/80 mb-3 relative">
@@ -3145,11 +3173,9 @@ const PARSER_WORKER_CODE = [
 
             const resolvedVoice = getModelForRoutingLevel(routingLevel);
             let voiceApiKey = userApiKey;
-            if (routingLevel !== "Auto") {
-              const providerKey = getSavedKeyForProvider(resolvedVoice.provider);
-              if (providerKey) {
-                voiceApiKey = providerKey;
-              }
+            const providerKey = getSavedKeyForProvider(resolvedVoice.provider);
+            if (providerKey) {
+              voiceApiKey = providerKey;
             }
 
             const response = await fetch("/api/chat", {
