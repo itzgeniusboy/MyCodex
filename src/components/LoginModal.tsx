@@ -81,6 +81,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSubmit }: LoginModa
           onLoginSubmit(userProfile);
           onClose();
         }, 800);
+      } else {
+        setSuccessMessage("Redirecting to Google Secure Sign-In...");
       }
     } catch (err: any) {
       console.error(err);

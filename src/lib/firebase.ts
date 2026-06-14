@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
+import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
@@ -21,6 +21,23 @@ export const db = getFirestore(app, databaseId);
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+
+// Auto-check redirect result on boot if in browser to capture Google access token
+if (typeof window !== "undefined") {
+  getRedirectResult(auth)
+    .then((result) => {
+      if (result) {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          cachedAccessToken = credential.accessToken;
+          console.log("Successfully cached Google access token from redirect.");
+        }
+      }
+    })
+    .catch((error) => {
+      console.error("Error retrieving Google redirect outcome:", error);
+    });
+}
 
 // Initialize auth state to sync with our app
 export const initAuth = (
@@ -51,13 +68,44 @@ export const googleSignIn = async (withGmailScopes = false): Promise<{ user: Use
       provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
       provider.addScope("https://www.googleapis.com/auth/gmail.send");
     }
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error("Failed to retrieve Google OAuth access token from Firebase credentials.");
+
+    // Detect if mobile/tablet or embedded webview to prefer Redirect directly
+    const isMobileDevice = typeof window !== "undefined" && (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      window.innerWidth < 1024
+    );
+
+    if (isMobileDevice) {
+      console.log("Mobile/tablet environment detected. Initiating signInWithRedirect...");
+      await signInWithRedirect(auth, provider);
+      return null; // Page will redirect and refresh automatically
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+
+    // High performance desktop flow: standard signInWithPopup
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error("Failed to retrieve Google OAuth access token from Firebase credentials.");
+      }
+      cachedAccessToken = credential.accessToken;
+      return { user: result.user, accessToken: cachedAccessToken };
+    } catch (popupError: any) {
+      const errorCode = popupError?.code || "";
+      console.warn("Popup authentication warning:", errorCode, popupError);
+      
+      // Fall back to redirect if popup is closed by user or blocked entirely
+      if (
+        errorCode.includes("popup-closed-by-user") ||
+        errorCode.includes("popup-blocked") ||
+        errorCode.includes("cancelled-popup-request")
+      ) {
+        console.log("Popup was closed or blocked. Gracefully redirecting the user instead...");
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
+      throw popupError;
+    }
   } catch (error: any) {
     console.error("Firebase Sign in error details:", error);
     throw error;
