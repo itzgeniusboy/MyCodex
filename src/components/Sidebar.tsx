@@ -15,7 +15,7 @@ interface SidebarProps {
   user: UserProfile;
   onLogout: () => void;
   onOpenApi: () => void;
-  onOpenGmail: () => void;
+  projectEnv?: "web" | "android" | "chat";
 }
 
 export default function Sidebar({
@@ -31,7 +31,7 @@ export default function Sidebar({
   user,
   onLogout,
   onOpenApi,
-  onOpenGmail,
+  projectEnv = "chat",
 }: SidebarProps) {
   return (
     <AnimatePresence>
@@ -156,9 +156,15 @@ export default function Sidebar({
 
             {/* Chat List category label */}
             <div className="mt-6 flex flex-col flex-1 overflow-y-auto">
-              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider px-2">History</span>
+              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider px-2">
+                {projectEnv === "chat" 
+                  ? "Standard Chat History" 
+                  : projectEnv === "web" 
+                  ? "Web Project History" 
+                  : "Android Project History"}
+              </span>
               
-              <div className="mt-2 space-y-1 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
+              <div className="mt-2 space-y-1 overflow-y-auto max-h-[calc(100vh-280px)] pr-1 font-sans">
                 {threads.length === 0 ? (
                   <div className="p-4 text-center text-xs text-neutral-500 italic">No conversations yet</div>
                 ) : (
@@ -173,14 +179,29 @@ export default function Sidebar({
                         }}
                         className={`group flex items-center justify-between rounded-lg p-2.5 text-sm cursor-pointer transition ${
                           isActive
-                            ? "bg-neutral-800 text-neutral-100 font-medium"
+                            ? "bg-neutral-850 border border-neutral-800/80 text-white font-medium shadow-[0_2px_8px_rgba(0,0,0,0.15)]"
                             : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
                         }`}
                       >
-                        <span className="truncate max-w-[180px]">{thread.title}</span>
+                        <div className="flex items-center gap-2 truncate pr-1">
+                          {thread.mode === "web_project" ? (
+                            <span className="text-[8px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1 py-0.5 rounded font-mono font-bold leading-none shrink-0 uppercase select-none">
+                              WEB
+                            </span>
+                          ) : thread.mode === "android_project" ? (
+                            <span className="text-[8px] bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20 px-1 py-0.5 rounded font-mono font-bold leading-none shrink-0 uppercase select-none">
+                              APK
+                            </span>
+                          ) : (
+                            <span className="text-[8px] bg-zinc-800 text-zinc-400 border border-zinc-700/50 px-1 py-0.5 rounded font-mono font-bold leading-none shrink-0 uppercase select-none">
+                              CHAT
+                            </span>
+                          )}
+                          <span className="truncate max-w-[135px] text-xs font-medium">{thread.title}</span>
+                        </div>
                         <button
                           onClick={(e) => onDeleteThread(thread.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-red-400 transition"
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-red-400 transition shrink-0"
                           title="Delete Thread"
                           id={`delete-thread-${thread.id}`}
                         >

@@ -743,13 +743,28 @@ async function startServer() {
   // API endpoint for chat messages
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, customApiKey, activeEngine, gitContext, projectEnv } = req.body;
+      const { messages, customApiKey, activeEngine, gitContext, projectEnv, routingLevel, customModel, customProvider } = req.body;
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required." });
       }
 
+      // Access custom API key from headers under 'x-gemini-api-key'
+      let headerApiKey = "";
+      if (req.headers) {
+        const headersAny = req.headers as any;
+        if (typeof headersAny.get === "function") {
+          headerApiKey = headersAny.get("x-gemini-api-key") || "";
+        }
+        if (!headerApiKey) {
+          headerApiKey = (req.headers["x-gemini-api-key"] as string) || "";
+        }
+      }
+
       // Determine active Key
-      let apiKey = (customApiKey && customApiKey.trim() !== "") ? customApiKey.trim() : "";
+      let apiKey = (headerApiKey && headerApiKey.trim() !== "") ? headerApiKey.trim() : "";
+      if (!apiKey && customApiKey && customApiKey.trim() !== "") {
+        apiKey = customApiKey.trim();
+      }
 
       // Intercept verified session key to route securely
       if (apiKey && apiKey.startsWith("session-verified-token-")) {
@@ -758,13 +773,15 @@ async function startServer() {
       }
       
       // If default key and no customKey provided, fallback to process.env.GEMINI_API_KEY
-      if (!apiKey && (!activeEngine || activeEngine.id === "default-proxy")) {
+      if (!apiKey) {
         apiKey = process.env.GEMINI_API_KEY || "";
       }
 
-      // Determine the active provider based on chosen engine or custom key pattern
+      // Determine the active provider based on chosen engine or custom key pattern or client routing
       let provider = "gemini";
-      if (activeEngine && activeEngine.provider) {
+      if (customProvider) {
+        provider = customProvider.toLowerCase();
+      } else if (activeEngine && activeEngine.provider) {
         provider = activeEngine.provider.toLowerCase();
       }
 
@@ -773,8 +790,10 @@ async function startServer() {
         provider = "groq";
         console.log("Automatically mapped provider to 'groq' due to 'gsk_' prefix key pattern.");
       } else if (apiKey.startsWith("sk-")) {
-        provider = "openai";
-        console.log("Automatically mapped provider to 'openai' due to 'sk-' prefix key pattern.");
+        if (!customProvider) {
+          provider = "openai";
+          console.log("Automatically mapped provider to 'openai' due to 'sk-' prefix key pattern.");
+        }
       } else if (apiKey.startsWith("AIzaSy")) {
         provider = "gemini";
         console.log("Automatically mapped provider to 'gemini' due to 'AIzaSy' prefix key pattern.");
@@ -827,7 +846,7 @@ async function startServer() {
         return res.json({ reply });
 
       } else if (provider.includes("openai")) {
-        console.log("Routing request to OpenAI completions standard proxy...");
+        console.log(`Routing request to OpenAI completions proxy with model: ${customModel || "gpt-4o-mini"}...`);
         const openaiUrl = "https://api.openai.com/v1/chat/completions";
         
         // Slice context payload to keep completions speedy
@@ -840,7 +859,7 @@ async function startServer() {
             "Authorization": `Bearer ${apiKey}`
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: customModel || "gpt-4o-mini",
             messages: limitedMessages.map((m: any) => ({
               role: m.role === "assistant" ? "assistant" : "user",
               content: m.content
@@ -863,6 +882,70 @@ async function startServer() {
 
         const data: any = await response.json();
         const reply = data.choices?.[0]?.message?.content || "No response returned from OpenAI.";
+        return res.json({ reply });
+
+      } else if (provider.includes("anthropic")) {
+        console.log(`Routing request to Anthropic Messages proxy with model: ${customModel || "claude-3-5-sonnet"}...`);
+        const anthropicUrl = "https://api.anthropic.com/v1/messages";
+
+        const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
+        const response = await fetch(anthropicUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify({
+            model: customModel || "claude-3-5-sonnet",
+            messages: limitedMessages.map((m: any) => ({
+              role: m.role === "assistant" ? "assistant" : "user",
+              content: m.content
+            })),
+            max_tokens: 4096,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const bodyStr = await response.text();
+          throw new Error(`Anthropic API Error (${response.status}): ${bodyStr}`);
+        }
+
+        const data: any = await response.json();
+        const reply = data.content?.[0]?.text || "No response returned from Anthropic.";
+        return res.json({ reply });
+
+      } else if (provider.includes("deepseek")) {
+        console.log(`Routing request to DeepSeek API proxy with model: ${customModel || "deepseek-chat"}...`);
+        const deepseekUrl = "https://api.deepseek.com/chat/completions";
+
+        const limitedMessages = messages.length > 10 ? messages.slice(-10) : messages;
+
+        const response = await fetch(deepseekUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: customModel || "deepseek-chat",
+            messages: limitedMessages.map((m: any) => ({
+              role: m.role === "assistant" ? "assistant" : "user",
+              content: m.content
+            })),
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const bodyStr = await response.text();
+          throw new Error(`DeepSeek API Error (${response.status}): ${bodyStr}`);
+        }
+
+        const data: any = await response.json();
+        const reply = data.choices?.[0]?.message?.content || "No response returned from DeepSeek.";
         return res.json({ reply });
 
       } else {
@@ -920,14 +1003,25 @@ async function startServer() {
         }
 
         let modelName = "gemini-3.5-flash";
-        const provLower = provider ? provider.toLowerCase() : "";
-        if (provLower.includes("pro")) {
-          modelName = "gemini-3.1-pro-preview";
-        } else if (provLower.includes("flash")) {
-          modelName = "gemini-3.5-flash";
+        if (customModel && customModel.startsWith("gemini-")) {
+          modelName = customModel;
+        } else {
+          const provLower = provider ? provider.toLowerCase() : "";
+          if (provLower.includes("pro")) {
+            modelName = "gemini-3.1-pro-preview";
+          } else if (provLower.includes("flash")) {
+            modelName = "gemini-3.5-flash";
+          }
         }
 
-        const modelsToTry = [modelName, "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-pro-preview"];
+        const modelsToTry = Array.from(new Set([
+          modelName,
+          "gemini-3.5-flash",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash",
+          "gemini-3.1-pro-preview",
+          "gemini-2.5-pro"
+        ]));
         let responseData: any = null;
         let lastError = null;
 

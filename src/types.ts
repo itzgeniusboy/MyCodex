@@ -12,6 +12,7 @@ export interface ChatThread {
   title: string;
   messages: Message[];
   updatedAt: Date;
+  mode?: "just_chat" | "web_project" | "android_project";
 }
 
 export interface UserProfile {

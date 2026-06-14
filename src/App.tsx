@@ -44,7 +44,6 @@ import LoginModal from "./components/LoginModal";
 import VoiceOverlay from "./components/VoiceOverlay";
 import SettingsModal from "./components/SettingsModal";
 import APIModal from "./components/APIModal";
-import GmailConsoleModal from "./components/GmailConsoleModal";
 import { Message, ChatThread, UserProfile, PresetPrompt } from "./types";
 import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -550,6 +549,33 @@ function TerminalTimerLines() {
   return <span>{text}</span>;
 }
 
+const cleanProjectTitle = (text: string): string => {
+  let cleaned = text.trim();
+  // Strip off some punctuation
+  cleaned = cleaned.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+  
+  // Strip common verbs
+  const regex = /^(build|make|create|develop|generate|design|write|program)\s+(a|an|the|my|some|simple|responsive)?\s*/i;
+  cleaned = cleaned.replace(regex, "");
+  
+  // Strip suffixes
+  cleaned = cleaned.replace(/\s+(app|apk|website|application|project|builder|screen|draft)$/i, "");
+  
+  if (cleaned.length > 2) {
+    // Capitalize Words
+    const words = cleaned.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    const result = words.join(" ");
+    return result.length > 30 ? result.substring(0, 30) + "..." : result;
+  }
+  return text.length > 25 ? text.substring(0, 25) + "..." : text;
+};
+
+const isBasicGreeting = (text: string): boolean => {
+  const normalized = text.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+  const greetings = ["hi", "hello", "hlw", "hy", "hey", "hola", "sup", "greetings", "yo", "wassup", "nm", "hlo"];
+  return greetings.includes(normalized);
+};
+
 export default function App() {
   // --- Core State Machine ---
   const [threads, setThreads] = useState<ChatThread[]>([]);
@@ -558,18 +584,6 @@ export default function App() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [rotationStatus, setRotationStatus] = useState<string | null>(null);
 
-  const getGmailVaultArray = () => {
-    try {
-      const raw = localStorage.getItem('pocketcodex_gmail_vault') || localStorage.getItem('chat_gpt_ios_gmail_accounts');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error("Error reading pocketcodex_gmail_vault", e);
-    }
-    return [];
-  };
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [introLoading, setIntroLoading] = useState(true);
 
@@ -581,12 +595,117 @@ export default function App() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
-  const [isGmailConsoleOpen, setIsGmailConsoleOpen] = useState(false);
 
   // Custom attachment states & input refs
   const [projectEnv, setProjectEnv] = useState<"web" | "android" | "chat">("web");
   const [isEnvDropdownOpen, setIsEnvDropdownOpen] = useState(false);
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+
+  // Model Router select states
+  const [routingLevel, setRoutingLevel] = useState<"Auto" | "Low" | "Medium" | "High" | "Custom">(() => {
+    return (localStorage.getItem("pocket_codex_routing_level") as any) || "Auto";
+  });
+  const [selectedCustomModel, setSelectedCustomModel] = useState<string>(() => {
+    return localStorage.getItem("pocket_codex_custom_model") || "gemini-3.5-flash";
+  });
+
+  const modelOptions = [
+    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", provider: "gemini", icon: "⚡" },
+    { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview", provider: "gemini", icon: "🧠" },
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "gemini", icon: "⚡" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "gemini", icon: "🧠" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", icon: "⚡" },
+    { id: "gpt-4o", name: "GPT-4o Standard", provider: "openai", icon: "🧠" },
+    { id: "claude-3-5-haiku", name: "Claude 3.5 Haiku", provider: "anthropic", icon: "⚡" },
+    { id: "claude-3-5-sonnet", name: "Claude 3.5 Sonnet", provider: "anthropic", icon: "🧠" },
+    { id: "deepseek-chat", name: "DeepSeek V3", provider: "deepseek", icon: "⚡" },
+    { id: "deepseek-reasoner", name: "DeepSeek R1", provider: "deepseek", icon: "🧠" },
+  ];
+
+  const getActiveProviders = () => {
+    const active: string[] = [];
+    try {
+      const savedListStr = localStorage.getItem("pocket_codex_saved_apis");
+      if (savedListStr) {
+        const parsed = JSON.parse(savedListStr);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item: any) => {
+            if (item.apiKey && item.apiKey.trim() !== "" && !item.apiKey.startsWith("session-verified-token-")) {
+              const prov = (item.provider || "").toLowerCase();
+              if (prov.includes("gemini") || prov.includes("google")) active.push("gemini");
+              if (prov.includes("openai")) active.push("openai");
+              if (prov.includes("anthropic") || prov.includes("claude")) active.push("anthropic");
+              if (prov.includes("deepseek")) active.push("deepseek");
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    const customKey = localStorage.getItem("chat_gpt_ios_custom_key") || "";
+    if (customKey && !customKey.startsWith("session-verified-token-")) {
+      const activeProvider = (localStorage.getItem("chat_gpt_ios_active_provider") || "Google Gemini").toLowerCase();
+      if (activeProvider.includes("gemini") || activeProvider.includes("google")) active.push("gemini");
+      if (activeProvider.includes("openai")) active.push("openai");
+      if (activeProvider.includes("anthropic") || activeProvider.includes("claude")) active.push("anthropic");
+      if (activeProvider.includes("deepseek")) active.push("deepseek");
+    }
+
+    if (active.length === 0) {
+      active.push("gemini");
+    }
+
+    return Array.from(new Set(active));
+  };
+
+  const getSavedKeyForProvider = (providerName: string): string => {
+    try {
+      const savedListStr = localStorage.getItem("pocket_codex_saved_apis");
+      if (savedListStr) {
+        const parsedList = JSON.parse(savedListStr);
+        if (Array.isArray(parsedList)) {
+          const found = parsedList.find((item: any) => {
+            const itemProv = (item.provider || "").toLowerCase();
+            const targetProv = providerName.toLowerCase();
+            return itemProv.includes(targetProv) || targetProv.includes(itemProv);
+          });
+          if (found && found.apiKey && !found.apiKey.startsWith("session-verified-token-")) {
+            return found.apiKey.trim();
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return "";
+  };
+
+  const getModelForRoutingLevel = (level: "Auto" | "Low" | "Medium" | "High" | "Custom"): { modelId: string; provider: string } => {
+    if (level === "Custom") {
+      const opt = modelOptions.find(o => o.id === selectedCustomModel);
+      return opt ? { modelId: opt.id, provider: opt.provider } : { modelId: "gemini-3.5-flash", provider: "gemini" };
+    }
+    const envProviders = getActiveProviders();
+
+    if (level === "Low") {
+      if (envProviders.includes("openai")) return { modelId: "gpt-4o-mini", provider: "openai" };
+      return { modelId: "gemini-3.5-flash", provider: "gemini" };
+    }
+    if (level === "Medium") {
+      if (envProviders.includes("anthropic")) return { modelId: "claude-3-5-haiku", provider: "anthropic" };
+      if (envProviders.includes("openai")) return { modelId: "gpt-4o-mini", provider: "openai" };
+      return { modelId: "gemini-3.5-flash", provider: "gemini" };
+    }
+    if (level === "High") {
+      if (envProviders.includes("anthropic")) return { modelId: "claude-3-5-sonnet", provider: "anthropic" };
+      if (envProviders.includes("deepseek")) return { modelId: "deepseek-reasoner", provider: "deepseek" };
+      if (envProviders.includes("openai")) return { modelId: "gpt-4o", provider: "openai" };
+      return { modelId: "gemini-3.1-pro-preview", provider: "gemini" };
+    }
+    return { modelId: "gemini-3.5-flash", provider: "gemini" };
+  };
   const [attachedFiles, setAttachedFiles] = useState<{
     id: string;
     name: string;
@@ -1281,7 +1400,8 @@ const PARSER_WORKER_CODE = [
           id: data.id,
           title: data.title || "Untitled Conversation",
           messages,
-          updatedAt: updatedAtDate
+          updatedAt: updatedAtDate,
+          mode: data.mode || "just_chat"
         });
       });
 
@@ -1293,6 +1413,7 @@ const PARSER_WORKER_CODE = [
       }
     } catch (error) {
       console.error("Firestore loading error:", error);
+      handleFirestoreError(error, OperationType.GET, `users/${userId}/threads`);
     }
   };
 
@@ -1303,6 +1424,7 @@ const PARSER_WORKER_CODE = [
         id: thread.id,
         title: thread.title,
         updatedAt: thread.updatedAt instanceof Date ? thread.updatedAt.toISOString() : new Date(thread.updatedAt).toISOString(),
+        mode: thread.mode || "just_chat",
         messages: thread.messages.map((m) => ({
           id: m.id,
           role: m.role,
@@ -1348,6 +1470,7 @@ const PARSER_WORKER_CODE = [
           }
         } catch (err) {
           console.error("Firestore user sync error:", err);
+          handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`);
         }
 
         // Pull user's conversations
@@ -1367,8 +1490,12 @@ const PARSER_WORKER_CODE = [
         if (stored) {
           const parsed: ChatThread[] = JSON.parse(stored);
           if (parsed.length > 0) {
-            setThreads(parsed);
-            setActiveThreadId(parsed[0].id);
+            const migrated = parsed.map(t => ({
+              ...t,
+              mode: t.mode || "just_chat"
+            }));
+            setThreads(migrated);
+            setActiveThreadId(migrated[0].id);
             lastLoadedUserEmailRef.current = user.email;
             return;
           }
@@ -1389,7 +1516,8 @@ const PARSER_WORKER_CODE = [
             timestamp: new Date()
           }
         ],
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        mode: "just_chat"
       };
       setThreads([initialThread]);
       setActiveThreadId(initialThread.id);
@@ -1469,14 +1597,67 @@ const PARSER_WORKER_CODE = [
     setActiveThreadId(id);
   };
 
+  const switchEnvironment = (nextEnv: "web" | "android" | "chat") => {
+    triggerHapticFeedback();
+    setProjectEnv(nextEnv);
+    if (nextEnv === "web" || nextEnv === "chat") {
+      setShowInspectorPanel(false);
+    }
+    if (nextEnv === "chat") {
+      setMainTab("chat");
+    }
+
+    const targetMode = nextEnv === "chat" ? "just_chat" : nextEnv === "web" ? "web_project" : "android_project";
+
+    const matchingThreads = threads.filter(t => {
+      if (targetMode === "just_chat") {
+        return t.mode === "just_chat" || !t.mode;
+      }
+      return t.mode === targetMode;
+    });
+
+    if (matchingThreads.length > 0) {
+      const sorted = [...matchingThreads].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+      setActiveThreadId(sorted[0].id);
+    } else {
+      const newId = `thread-${Date.now()}`;
+      let title = "New Chat";
+      if (nextEnv === "web") {
+        title = "New Web App Project";
+      } else if (nextEnv === "android") {
+        title = "New Android APK Project";
+      }
+
+      const newThread: ChatThread = {
+        id: newId,
+        title,
+        messages: [],
+        updatedAt: new Date(),
+        mode: targetMode
+      };
+
+      setThreads(prev => [newThread, ...prev]);
+      setActiveThreadId(newId);
+    }
+  };
+
   const handleNewChat = () => {
     triggerHapticFeedback();
     const newId = `thread-${Date.now()}`;
+    const targetMode = projectEnv === "chat" ? "just_chat" : projectEnv === "web" ? "web_project" : "android_project";
+    let title = "New Chat";
+    if (projectEnv === "web") {
+      title = "New Web App Project";
+    } else if (projectEnv === "android") {
+      title = "New Android APK Project";
+    }
+
     const newThread: ChatThread = {
       id: newId,
-      title: "New Chat",
+      title,
       messages: [],
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      mode: targetMode
     };
     setThreads((prev) => [newThread, ...prev]);
     setActiveThreadId(newId);
@@ -1494,6 +1675,7 @@ const PARSER_WORKER_CODE = [
         await deleteDoc(doc(db, "users", auth.currentUser.uid, "threads", id));
       } catch (error) {
         console.error("Failed to delete thread from firestore", error);
+        handleFirestoreError(error, OperationType.DELETE, `users/${auth.currentUser.uid}/threads/${id}`);
       }
     }
     
@@ -1528,6 +1710,7 @@ const PARSER_WORKER_CODE = [
         }
       } catch (error) {
         console.error("Failed to clear firestore history", error);
+        handleFirestoreError(error, OperationType.DELETE, `users/${auth.currentUser.uid}/threads`);
       }
     }
 
@@ -1595,16 +1778,33 @@ const PARSER_WORKER_CODE = [
 
     let currentThread = threads.find((t) => t.id === activeThreadId);
     let updatedMsgs: Message[] = [];
+    const targetMode = projectEnv === "chat" ? "just_chat" : projectEnv === "web" ? "web_project" : "android_project";
+
+    // Detect creation prompts vs basic greetings
+    const isCreation = projectEnv !== "chat" && !isBasicGreeting(text);
+    const titleText = text.trim() || (attachedFiles.length > 0 ? attachedFiles[0].name : "Attachment Appended");
+    let calculatedTitle = "New Chat";
+    if (projectEnv === "web") {
+      calculatedTitle = "New Web App Project";
+    } else if (projectEnv === "android") {
+      calculatedTitle = "New Android APK Project";
+    }
+
+    if (isCreation) {
+      calculatedTitle = cleanProjectTitle(titleText);
+    } else {
+      calculatedTitle = titleText.length > 25 ? titleText.substring(0, 25) + "..." : titleText;
+    }
 
     if (!currentThread) {
       // Fallback create thread
       const newId = `thread-${Date.now()}`;
-      const titleText = text.trim() || (attachedFiles.length > 0 ? attachedFiles[0].name : "Attachment Appended");
       currentThread = {
         id: newId,
-        title: titleText.length > 25 ? titleText.substring(0, 25) + "..." : titleText,
+        title: calculatedTitle,
         messages: [userMsg],
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        mode: targetMode
       };
       setThreads((prev) => [currentThread!, ...prev]);
       setActiveThreadId(newId);
@@ -1612,16 +1812,20 @@ const PARSER_WORKER_CODE = [
     } else {
       updatedMsgs = [...currentThread.messages, userMsg];
       
-      // Auto-rename thread title if it was default "New Chat" empty state list
-      const titleText = text.trim() || (attachedFiles.length > 0 ? attachedFiles[0].name : "Attachment Appended");
-      const title = currentThread.title === "New Chat" || currentThread.title === "Swagat hai! Start here"
-          ? (titleText.length > 25 ? titleText.substring(0, 25) + "..." : titleText)
-          : currentThread.title;
+      const isDefaultPlaceholder = 
+        currentThread.title === "New Chat" ||
+        currentThread.title === "New Web App Project" || 
+        currentThread.title === "New Android APK Project" ||
+        currentThread.title === "Swagat hai! Start here";
+      
+      const newTitle = (isCreation || isDefaultPlaceholder)
+        ? calculatedTitle
+        : currentThread.title;
 
       setThreads((prev) =>
         prev.map((t) =>
           t.id === activeThreadId
-            ? { ...t, messages: updatedMsgs, title, updatedAt: new Date() }
+            ? { ...t, messages: updatedMsgs, title: newTitle, updatedAt: new Date(), mode: t.mode || targetMode }
             : t
         )
       );
@@ -1632,293 +1836,104 @@ const PARSER_WORKER_CODE = [
     setIsAiLoading(true);
 
     const engine = getActiveEngine();
-    let vault = getGmailVaultArray();
-    let nonExhausted = vault.filter((acc: any) => !acc.isExhausted);
-    if (vault.length > 0 && nonExhausted.length === 0) {
-      // Automatic reset of exhausted profiles if all are rate-limited
-      vault = vault.map((acc: any) => ({ ...acc, isExhausted: false }));
-      localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(vault));
-      localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(vault));
-      nonExhausted = vault;
+    
+    // Grab the ACTUAL user-entered cryptographic key from settings securely (avoiding session-verified-token)
+    let userApiKey = "";
+    try {
+      const savedListStr = localStorage.getItem("pocket_codex_saved_apis");
+      if (savedListStr) {
+        const parsedList = JSON.parse(savedListStr);
+        if (Array.isArray(parsedList)) {
+          const activeItem = parsedList.find((item: any) => item.isActive);
+          if (activeItem && activeItem.apiKey && !activeItem.apiKey.startsWith("session-verified-token-")) {
+            userApiKey = activeItem.apiKey.trim();
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
     }
-
-    let startIndex = nonExhausted.findIndex((acc: any) => acc.isActive);
-    if (startIndex === -1) startIndex = 0;
+    if (!userApiKey) {
+      const cand = localStorage.getItem("chat_gpt_ios_custom_key") || "";
+      if (cand && !cand.startsWith("session-verified-token-")) {
+        userApiKey = cand.trim();
+      }
+    }
 
     let success = false;
     let reply = "";
-    let selectedModel = "gemini-3.5-flash";
-    if (engine.provider?.toLowerCase().includes("pro")) {
-      selectedModel = "gemini-3.1-pro-preview";
-    }
-
-    const currentMode = projectEnv === "chat" ? "JUST CHAT" : "BUILD ARTIFACTS";
-    let apiUrl = "/api/chat";
-    let fetchOptions: RequestInit = {};
-
-    let attemptIndex = startIndex;
-    const maxVaultAttempts = Math.max(1, nonExhausted.length);
-    let attemptsCount = 0;
-    let lastErr: any = null;
-
-    setRotationStatus(null);
 
     try {
-      while (!success && attemptsCount < maxVaultAttempts) {
-      let currentToken = "";
-      let currentEmail = "Primary Config";
+      let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
+      
+      // Append hidden context rule to the very last user message content
+      if (apiMessages.length > 0 && projectEnv !== "chat") {
+        const lastMsg = apiMessages[apiMessages.length - 1];
+        if (lastMsg.role === "user") {
+          const userGreeting = isBasicGreeting(text);
+          let hiddenRule = "";
 
-      if (nonExhausted.length > 0 && attemptIndex < nonExhausted.length) {
-        currentToken = nonExhausted[attemptIndex].accessToken;
-        currentEmail = nonExhausted[attemptIndex].email;
-      } else {
-        const customKey = localStorage.getItem("chat_gpt_ios_custom_key") || "";
-        currentToken = (customKey.trim() !== "") ? customKey.trim() : engine.apiKey;
-        currentEmail = "Primary Config";
-      }
-
-      const savedApiKey = localStorage.getItem("gemini_api_key") || localStorage.getItem("chat_gpt_ios_custom_key") || engine.apiKey || "";
-      const isGeminiFamily = engine.provider?.toLowerCase().includes("gemini") || savedApiKey.startsWith("AIzaSy") || savedApiKey.startsWith("mock-token") || savedApiKey.startsWith("mock-custom-token");
-
-      try {
-        let apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
-        
-        // Append hidden context rule to the very last user message content
-        if (apiMessages.length > 0 && projectEnv !== "chat") {
-          const lastMsg = apiMessages[apiMessages.length - 1];
-          if (lastMsg.role === "user") {
-            const hiddenRule = projectEnv === "web"
-              ? "\n\n(System Context: The user is in a strict raw browser sandbox. You MUST deliver code ONLY as standard self-contained HTML/CSS/JavaScript. DO NOT use React component file types, JSX, TypeScript syntax, or npm import packages like lucide-react.)"
-              : "\n\n(System Context: Target is Android APK (NDK). Please render app-specific structural nodes, native components, build structures, activity configuration codes, or JNI/NDK native details suitable for an Android codebase.)";
-            
-            lastMsg.content = lastMsg.content + hiddenRule;
-          }
-        }
-
-        if (isGeminiFamily) {
-          // Attempt fallback model arrays in case the specific version is not enabled or throws 404 on API gateway
-          const modelsToTry = [
-            selectedModel,
-            "gemini-3.5-flash",
-            "gemini-flash-latest",
-            "gemini-3.1-pro-preview"
-          ];
-
-          let modelSuccess = false;
-          let modelErr: any = null;
-
-          for (const currentModel of modelsToTry) {
-            const headers: Record<string, string> = {
-              "Content-Type": "application/json"
-            };
-
-            apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${savedApiKey}`;
-            
-            let payload: any = null;
-            if (projectEnv === "chat") {
-              // STRICT chat payload: strictly format raw user text query - no system prompt boilerplates or instruction formatters
-              payload = {
-                contents: [
-                  {
-                    role: "user",
-                    parts: [{ text: text }]
-                  }
-                ]
-              };
+          if (projectEnv === "web") {
+            if (userGreeting) {
+              hiddenRule = "\n\n(System Context: The user just said a basic greeting. Since they are in the Web App Builder mode, introduce yourself briefly as PocketCodex - Web App Builder, and invite them to describe the web application they want to build. Do NOT output a project tree or code since they have not requested an app to be built yet.)";
             } else {
-              // Normal system context generation payloads
-              const sanitizeGeminiContents = (rawMessages: any[]) => {
-                // Slicing history to the last 10 messages for dramatic response speed up
-                const limitedMessages = rawMessages.length > 10 ? rawMessages.slice(-10) : rawMessages;
-                const mapped = limitedMessages
-                  .filter(m => m && m.content && m.content.trim() !== "")
-                  .map(m => {
-                    const role = (m.role === "assistant" || m.role === "model") ? "model" : "user";
-                    return {
-                      role,
-                      text: m.content.trim()
-                    };
-                  });
-
-                if (mapped.length === 0) {
-                  return [];
-                }
-
-                const cleaned: any[] = [];
-                let currentGroup = mapped[0];
-
-                for (let i = 1; i < mapped.length; i++) {
-                  const nextMsg = mapped[i];
-                  if (nextMsg.role === currentGroup.role) {
-                    currentGroup.text += "\n\n" + nextMsg.text;
-                  } else {
-                    cleaned.push(currentGroup);
-                    currentGroup = nextMsg;
-                  }
-                }
-                cleaned.push(currentGroup);
-
-                while (cleaned.length > 0 && cleaned[0].role !== "user") {
-                  cleaned.shift();
-                }
-
-                return cleaned.map(item => ({
-                  role: item.role,
-                  parts: [{ text: item.text }]
-                }));
-              };
-
-              const contents = sanitizeGeminiContents(apiMessages);
-
-              let systemInstruction = "You are ChatGPT, a helpful AI chatbot. Respond in Hindi, English, Hinglish or the language matching the user's input. Provide useful, concise yet comprehensive markdown-supported responses with a friendly iOS-style assistant voice. Keep formatting clean with bullet lists, lists, or code blocks where appropriate.";
-              
-              if (gitHubConnectedState === "connected" && selectedRepo) {
-                // Truncate the file list if it exceeds 30 files to supercharge response speed
-                const fileTreeSubset = gitHubFiles.length > 30 
-                  ? [...gitHubFiles.slice(0, 30), `... and ${gitHubFiles.length - 30} other files`]
-                  : gitHubFiles;
-                systemInstruction += `\n\n[Active GitHub Workspace recursive file tree map]:\nRepository: ${selectedRepo}\nTotal tracked files: ${gitHubFiles.length}\nFiles existing in workspace:\n${JSON.stringify(fileTreeSubset, null, 2)}\n\nIMPORTANT: You can propose multi-file changes simultaneously. When proposing changes, group and output each file's complete new content in its own markdown code block with the language and target filepath cleanly prefixed on the code block declaration line (e.g., \`\`\`tsx src/App.tsx\n...content...\n\`\`\` or \`\`\`html index.html\n...content...\n\`\`\`). This allows the developer to seamlessly push all proposed multi-file changes synchronously to GitHub in one-click! Ensure the code is production-ready.`;
-              }
-
-              payload = {
-                contents: contents,
-                systemInstruction: {
-                  parts: [{ text: systemInstruction }]
-                },
-                generationConfig: {
-                  temperature: 0.7
-                }
-              };
+              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build a new Web App project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── index.html, ├── script.js, etc.). Next, provide a short, professional architecture explanation, and finally write code inside markdown code blocks (using \`\`\`html) as standard, self-contained interactive sandbox code. Keep the application visually polished with a premium look, and use Tailwind CSS or custom styles inside the HTML.)";
             }
-
-            fetchOptions = {
-              method: "POST",
-              headers: headers,
-              body: JSON.stringify(payload)
-            };
-
-            try {
-              const response = await fetch(apiUrl, fetchOptions);
-              const errBody = await response.text();
-              let parsed: any = null;
-              try { parsed = JSON.parse(errBody); } catch(pe) {}
-
-              const isQuotaExceeded = response.status === 429 || 
-                errBody.includes("quotaExceeded") || 
-                errBody.includes("RESOURCE_EXHAUSTED") || 
-                errBody.includes("Rate Limit Exceeded") ||
-                errBody.includes("quota exceeded");
-
-              if (isQuotaExceeded) {
-                throw new Error("QUOTA_EXHAUSTED_TRIGGER_FAILOVER: Rate limit or quota exceeded.");
-              }
-
-              if (response.ok && parsed) {
-                reply = parsed.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated by model.";
-                modelSuccess = true;
-                selectedModel = currentModel; // Update final active model identifier for debug view
-                break;
-              } else {
-                throw new Error(parsed?.error?.message || `Google API returned status ${response.status}: ${errBody}`);
-              }
-            } catch (fe: any) {
-              modelErr = fe;
-              if (fe.message && fe.message.includes("QUOTA_EXHAUSTED_TRIGGER_FAILOVER")) {
-                throw fe;
-              }
+          } else if (projectEnv === "android") {
+            if (userGreeting) {
+              hiddenRule = "\n\n(System Context: The user just said a basic greeting. Since they are in the Android APK Builder mode, introduce yourself briefly as PocketCodex - Android APK Builder, and invite them to describe the Android APK/app they want to build. Do NOT output code or a project tree since they have not requested an app to be built yet.)";
+            } else {
+              hiddenRule = "\n\n(System Context: PROJECT CREATION STATE ACTIVE: The user wants to build an Android APK project. You must output a structured file tree at the top of your response using standard text symbols (e.g. ├── AndroidManifest.xml, ├── MainActivity.kt, ├── build.gradle). Next, provide native components, structural nodes, activity setup details, or Kotlin/NDK implementation code inside markdown code blocks.)";
             }
           }
-
-          if (modelSuccess) {
-            success = true;
-          } else {
-            throw modelErr || new Error("All attempted Gemini model endpoints returned failure status.");
-          }
-
-        } else {
-          // Normal Node.js proxy payload fallback
-          apiUrl = "/api/chat";
-          fetchOptions = {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messages: apiMessages,
-              customApiKey: savedApiKey,
-              activeEngine: engine,
-              projectEnv: projectEnv,
-              gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
-                repo: selectedRepo,
-                filename: selectedFile,
-                content: selectedFileContent
-              } : null
-            })
-          };
-
-          const response = await fetch(apiUrl, fetchOptions);
-          const isQuotaHttp = response.status === 429;
-          const textRes = await response.text();
-          let parsedData: any = {};
-          try { parsedData = JSON.parse(textRes); } catch(pe) {}
-
-          const hasQuotaErrorText = textRes.includes("quotaExceeded") || 
-            textRes.includes("RESOURCE_EXHAUSTED") || 
-            textRes.includes("Rate Limit Exceeded") ||
-            textRes.includes("quota exceeded") ||
-            (parsedData?.error && (
-              parsedData.error.includes("quota") || 
-              parsedData.error.includes("exceeded") ||
-              parsedData.error.includes("429") ||
-              parsedData.error.includes("exhausted")
-            ));
-
-          if (isQuotaHttp || hasQuotaErrorText) {
-            throw new Error("QUOTA_EXHAUSTED_TRIGGER_FAILOVER: Rate limit or quota exceeded in proxy.");
-          }
-
-          if (!response.ok) {
-            throw new Error(parsedData?.error || "Failed server API response status");
-          }
-
-          reply = parsedData.reply;
-          success = true;
-        }
-
-      } catch (err: any) {
-        lastErr = err;
-        console.warn(`Token attempt with account ${currentEmail} failed:`, err.message || err);
-
-        const isQuotaError = err.message && err.message.includes("QUOTA_EXHAUSTED_TRIGGER_FAILOVER");
-
-        if (isQuotaError && nonExhausted.length > 0) {
-          setRotationStatus(`Auto-Failover active: Switching from rate-limited profile (${currentEmail})...`);
           
-          const failedAcc = nonExhausted[attemptIndex];
-          if (failedAcc) {
-            const freshVault = getGmailVaultArray().map((acc: any) => {
-              if (acc.email === failedAcc.email || acc.id === failedAcc.id) {
-                return { ...acc, isExhausted: true };
-              }
-              return acc;
-            });
-            localStorage.setItem("pocketcodex_gmail_vault", JSON.stringify(freshVault));
-            localStorage.setItem("chat_gpt_ios_gmail_accounts", JSON.stringify(freshVault));
-            nonExhausted = freshVault.filter((acc: any) => !acc.isExhausted);
-          }
-
-          attemptIndex = (attemptIndex + 1) % Math.max(1, nonExhausted.length);
-          attemptsCount++;
-        } else {
-          // Break immediately on non-quota terminal errors
-          break;
+          lastMsg.content = lastMsg.content + hiddenRule;
         }
       }
-    }
 
-    setRotationStatus(null);
+      const resolved = getModelForRoutingLevel(routingLevel);
+      let activeApiKey = userApiKey;
+      if (routingLevel !== "Auto") {
+        const providerKey = getSavedKeyForProvider(resolved.provider);
+        if (providerKey) {
+          activeApiKey = providerKey;
+        }
+      }
 
-    if (!success) {
-      throw lastErr || new Error("All attempted failover account credentials returned quota exhaustion or failures.");
-    }
+      const apiUrl = "/api/chat";
+      const fetchOptions = {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-gemini-api-key": activeApiKey
+        },
+        body: JSON.stringify({
+          messages: apiMessages,
+          customApiKey: activeApiKey,
+          activeEngine: engine,
+          projectEnv: projectEnv,
+          routingLevel: routingLevel,
+          customModel: resolved.modelId,
+          customProvider: resolved.provider,
+          gitContext: gitHubConnectedState === "connected" && selectedRepo && selectedFile ? {
+            repo: selectedRepo,
+            filename: selectedFile,
+            content: selectedFileContent
+          } : null
+        })
+      };
+
+      const response = await fetch(apiUrl, fetchOptions);
+      const textRes = await response.text();
+      let parsedData: any = {};
+      try { parsedData = JSON.parse(textRes); } catch(pe) {}
+
+      if (!response.ok) {
+        throw new Error(parsedData?.error || `Failed proxy response status ${response.status}: ${textRes}`);
+      }
+
+      reply = parsedData.reply || "No response generated by model.";
+      success = true;
 
       const targetThreadId = currentThread ? currentThread.id : activeThreadId;
       const assistantMsgId = `msg-${Date.now() + 1}`;
@@ -1969,10 +1984,11 @@ const PARSER_WORKER_CODE = [
           clearInterval(streamTimer);
         }
       }, 30);
+
     } catch (err: any) {
       console.error(err);
       
-      const debugMsgContent = `⚠️ DEBUG INFO:\nError: ${err.message}\nAttempted URL: ${apiUrl}\nActive Model: ${selectedModel}\nMode: ${currentMode}`;
+      const debugMsgContent = `⚠️ DEBUG INFO:\nError: ${err.message}\nAttempted Mode: ${projectEnv === "chat" ? "JUST CHAT" : "BUILD ARTIFACTS"}`;
       
       const debugMsg: Message = {
         id: `msg-debug-${Date.now()}`,
@@ -2135,7 +2151,16 @@ const PARSER_WORKER_CODE = [
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        threads={threads}
+        threads={threads.filter((t) => {
+          if (projectEnv === "chat") {
+            return t.mode === "just_chat" || !t.mode;
+          } else if (projectEnv === "web") {
+            return t.mode === "web_project";
+          } else if (projectEnv === "android") {
+            return t.mode === "android_project";
+          }
+          return true;
+        })}
         activeThreadId={activeThreadId}
         onSelectThread={handleSelectThread}
         onNewChat={handleNewChat}
@@ -2153,7 +2178,7 @@ const PARSER_WORKER_CODE = [
           });
         }}
         onOpenApi={() => setIsApiModalOpen(true)}
-        onOpenGmail={() => setIsGmailConsoleOpen(true)}
+        projectEnv={projectEnv}
       />
 
       {/* 2. Main Chat Frame Space */}
@@ -2644,15 +2669,8 @@ const PARSER_WORKER_CODE = [
                 <button
                   type="button"
                   onClick={() => {
-                    triggerHapticFeedback();
                     const nextEnv = projectEnv === "web" ? "android" : projectEnv === "android" ? "chat" : "web";
-                    setProjectEnv(nextEnv);
-                    if (nextEnv === "web" || nextEnv === "chat") {
-                      setShowInspectorPanel(false);
-                    }
-                    if (nextEnv === "chat") {
-                      setMainTab("chat");
-                    }
+                    switchEnvironment(nextEnv);
                   }}
                   className="flex items-center gap-1.5 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-neutral-300 hover:text-white bg-[#161619] border border-neutral-800/80 rounded-full shadow-lg transition select-none active:scale-95"
                   title="Toggle Environment (WEB APP / ANDROID APK / JUST CHAT)"
@@ -2824,6 +2842,67 @@ const PARSER_WORKER_CODE = [
                         </div>
                       )}
                     </div>
+
+                    {/* AI ROUTING LEVEL Section */}
+                    <div className="border-t border-neutral-800/80 my-1 pt-2 px-1">
+                      <span className="text-[9px] uppercase tracking-wider font-extrabold text-[#ff5500] mb-1.5 block select-none">
+                        AI Routing Level
+                      </span>
+
+                      {/* 5 Selectable level pill-buttons */}
+                      <div className="grid grid-cols-5 gap-1 px-0.5 mb-2">
+                        {(["Auto", "Low", "Medium", "High", "Custom"] as const).map((level) => {
+                          const isActive = routingLevel === level;
+                          return (
+                            <button
+                              key={level}
+                              type="button"
+                              onClick={() => {
+                                triggerHapticFeedback();
+                                setRoutingLevel(level);
+                                localStorage.setItem("pocket_codex_routing_level", level);
+                              }}
+                              className={`py-1 text-[9px] rounded-lg border font-bold text-center transition-all ${
+                                isActive
+                                  ? "bg-amber-500/15 border-amber-500/60 text-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.15)]"
+                                  : "bg-[#141416] border-neutral-800 text-neutral-400 hover:bg-neutral-900 hover:text-white"
+                              }`}
+                              title={`${level} level model router`}
+                            >
+                              {level}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Dynamic secondary sub-dropdown listing ONLY specific models from active keys */}
+                      {routingLevel === "Custom" && (
+                        <div className="mt-1 pt-2 border-t border-neutral-800/40 space-y-1.5">
+                          <label className="text-[8px] text-neutral-400 font-bold block select-none uppercase tracking-wider">
+                            Select Custom Model
+                          </label>
+                          <select
+                            value={selectedCustomModel}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSelectedCustomModel(val);
+                              localStorage.setItem("pocket_codex_custom_model", val);
+                              triggerHapticFeedback();
+                            }}
+                            className="w-full bg-[#16161a] text-[10px] text-white rounded-lg border border-neutral-800 p-1.5 focus:outline-none focus:border-neutral-600 cursor-pointer font-sans"
+                          >
+                            <option value="" disabled>-- Choose a Model --</option>
+                            {modelOptions
+                              .filter((opt) => getActiveProviders().includes(opt.provider))
+                              .map((opt) => (
+                                <option key={opt.id} value={opt.id} className="bg-[#111113]">
+                                  {opt.icon} {opt.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -2832,7 +2911,15 @@ const PARSER_WORKER_CODE = [
               <textarea
                 ref={textareaRef}
                 rows={1}
-                placeholder={isAiLoading ? "PocketCodex is computing response..." : "Message PocketCodex..."}
+                placeholder={
+                  isAiLoading 
+                    ? "PocketCodex is computing response..." 
+                    : projectEnv === "web"
+                    ? "Describe the Web App you want to build..."
+                    : projectEnv === "android"
+                    ? "Describe the Android APK you want to build..."
+                    : "Message PocketCodex..."
+                }
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyDown={(e) => {
@@ -3010,14 +3097,52 @@ const PARSER_WORKER_CODE = [
         onSendVoiceQuery={async (speechContent) => {
           // Send voice request and return reply
           try {
+            // Grab the ACTUAL user-entered cryptographic key from settings securely (avoiding session-verified-token)
+            let userApiKey = "";
+            try {
+              const savedListStr = localStorage.getItem("pocket_codex_saved_apis");
+              if (savedListStr) {
+                const parsedList = JSON.parse(savedListStr);
+                if (Array.isArray(parsedList)) {
+                  const activeItem = parsedList.find((item: any) => item.isActive);
+                  if (activeItem && activeItem.apiKey && !activeItem.apiKey.startsWith("session-verified-token-")) {
+                    userApiKey = activeItem.apiKey.trim();
+                  }
+                }
+              }
+            } catch (e) {
+              console.error(e);
+            }
+            if (!userApiKey) {
+              const cand = localStorage.getItem("chat_gpt_ios_custom_key") || "";
+              if (cand && !cand.startsWith("session-verified-token-")) {
+                userApiKey = cand.trim();
+              }
+            }
+
+            const resolvedVoice = getModelForRoutingLevel(routingLevel);
+            let voiceApiKey = userApiKey;
+            if (routingLevel !== "Auto") {
+              const providerKey = getSavedKeyForProvider(resolvedVoice.provider);
+              if (providerKey) {
+                voiceApiKey = providerKey;
+              }
+            }
+
             const response = await fetch("/api/chat", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                "x-gemini-api-key": voiceApiKey
+              },
               body: JSON.stringify({
                 messages: [{ role: "user", content: speechContent }],
-                customApiKey: localStorage.getItem("chat_gpt_ios_custom_key") || "",
+                customApiKey: voiceApiKey,
                 activeEngine: getActiveEngine(),
-                projectEnv: "chat"
+                projectEnv: "chat",
+                routingLevel: routingLevel,
+                customModel: resolvedVoice.modelId,
+                customProvider: resolvedVoice.provider
               })
             });
             if (!response.ok) throw new Error("API call error");
@@ -3074,16 +3199,6 @@ const PARSER_WORKER_CODE = [
         hapticEnabled={hapticEnabled}
         activeUser={user}
         onActiveUserChange={setUser}
-      />
-
-      <GmailConsoleModal
-        isOpen={isGmailConsoleOpen}
-        onClose={() => setIsGmailConsoleOpen(false)}
-        hapticEnabled={hapticEnabled}
-        onPromptGptFromMail={(prompt) => {
-          setInputMessage(prompt);
-          handleSendMessage(prompt);
-        }}
       />
 
       {/* 6. Artifact Sandbox Drawer Overlay */}
@@ -3173,7 +3288,15 @@ const PARSER_WORKER_CODE = [
                 <button
                   onClick={() => {
                     triggerHapticFeedback();
+                    const activeMode = projectEnv === "chat" ? "just_chat" : (projectEnv === "web" ? "web_project" : "android_project");
+                    if (activeMode === "just_chat") {
+                      setMainTab("chat");
+                    }
                     setIsSandboxOpen(false);
+                    setSandboxCode("");
+                    if (textareaRef.current) {
+                      textareaRef.current.focus();
+                    }
                   }}
                   className="flex items-center justify-center rounded-lg bg-neutral-900 border border-neutral-850 text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100 px-2.5 py-1.5 text-[10px] transition cursor-pointer select-none"
                   title="Close"
